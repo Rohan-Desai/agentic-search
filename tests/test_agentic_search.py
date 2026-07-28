@@ -4,7 +4,13 @@ from types import SimpleNamespace
 import pytest
 
 from app.agents import agentic_search
-from app.models.research import AgentAnswer, AgentAnswerOutcome
+from app.models.research import (
+    AgentAnswer,
+    AgentAnswerOutcome,
+    AttemptStatus,
+    EvidenceCandidate,
+    SearchAttempt,
+)
 from app.models.schemas import ConversationTurn, SearchMode
 
 
@@ -16,7 +22,7 @@ async def test_agent_runs_with_tools_history_scope_and_turn_limit(monkeypatch) -
         captured.update(agent=agent, prompt=prompt, kwargs=kwargs)
         return SimpleNamespace(
             final_output=AgentAnswer(
-                answer="Coral Bay has the higher price. [E1]",
+                answer="Coral Bay has the higher price.",
                 outcome=AgentAnswerOutcome.ANSWERED,
             ),
             new_items=[],
@@ -76,3 +82,63 @@ async def test_agent_outcome_sets_public_flags(
 
     assert response.answer_found is answer_found
     assert response.clarification_needed is clarification_needed
+
+
+@pytest.mark.asyncio
+async def test_cited_ledger_evidence_becomes_citation(monkeypatch) -> None:
+    async def fake_run(*args, **kwargs):
+        tool_context = kwargs["context"]
+        tool_context.ledger.add(
+            EvidenceCandidate(
+                doc_id="doc-1",
+                filename="policy.pdf",
+                chunk_id="chunk-1",
+                text="The COO has executive accountability for safety.",
+                query="executive safety accountability",
+                retrieval_score=0.82,
+            )
+        )
+        tool_context.research.attempts.append(
+            SearchAttempt(
+                tool_name="search_evidence",
+                query="executive safety accountability",
+                result_evidence_ids=["E1"],
+                new_evidence_count=1,
+                status=AttemptStatus.SUCCEEDED,
+            )
+        )
+        return SimpleNamespace(
+            final_output=AgentAnswer(
+                answer="The COO has executive accountability for safety. [E1]",
+                outcome=AgentAnswerOutcome.ANSWERED,
+            ),
+            new_items=[],
+        )
+
+    monkeypatch.setattr(agentic_search.Runner, "run", fake_run)
+
+    response = await agentic_search.run_agentic_search(
+        "Who has executive accountability for safety?",
+        top_k=5,
+        doc_ids=None,
+    )
+
+    assert len(response.citations) == 1
+    assert response.citations[0].filename == "policy.pdf"
+    assert response.citations[0].score == 0.82
+    assert [step.model_dump() for step in response.steps] == [
+        {
+            "kind": "tool",
+            "name": "search_evidence",
+            "detail": (
+                "status=succeeded; query=executive safety accountability; "
+                "results=1; new_evidence=1"
+            ),
+        }
+    ]
+
+
+def test_cited_evidence_ids_are_ordered_and_deduplicated() -> None:
+    assert agentic_search.cited_evidence_ids(
+        "First [E2], then [E1], then [E2] again."
+    ) == ["E2", "E1"]
