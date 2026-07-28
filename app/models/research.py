@@ -237,8 +237,14 @@ class ResearchAgentOutput(BaseModel):
     requirements: list[AnswerRequirement] = Field(default_factory=list)
     evidence_assessments: list[EvidenceAssessment] = Field(default_factory=list)
     claims: list[MaterialClaim] = Field(default_factory=list)
-    missing_requirements: list[str] = Field(default_factory=list)
-    unresolved_conflicts: list[str] = Field(default_factory=list)
+    missing_requirements: list[str] = Field(
+        default_factory=list,
+        description="Requirement IDs that remain unsearched, weak, or not found.",
+    )
+    unresolved_conflicts: list[str] = Field(
+        default_factory=list,
+        description="Requirement IDs whose supporting evidence remains conflicting.",
+    )
     stop_reason: StopReason
 
 
