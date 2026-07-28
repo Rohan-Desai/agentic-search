@@ -64,6 +64,21 @@ class StopReason(str, Enum):
     ERROR = "error"
 
 
+class AgentAnswerOutcome(str, Enum):
+    """The three user-facing outcomes produced by agentic search."""
+
+    ANSWERED = "answered"
+    NOT_FOUND = "not_found"
+    CLARIFICATION = "clarification"
+
+
+class AgentAnswer(BaseModel):
+    """Minimal structured output returned by the agent."""
+
+    answer: str = Field(..., min_length=1)
+    outcome: AgentAnswerOutcome
+
+
 class ClaimType(str, Enum):
     """How a material claim relates to its supporting evidence."""
 

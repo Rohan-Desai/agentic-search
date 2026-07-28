@@ -5,6 +5,8 @@ import pytest
 from pydantic import ValidationError
 
 from app.models.research import (
+    AgentAnswer,
+    AgentAnswerOutcome,
     AnswerRequirement,
     EvidenceAssessment,
     EvidenceDiscovery,
@@ -20,6 +22,18 @@ from app.models.research import (
     StopReason,
 )
 from app.models.schemas import ConversationTurn
+
+
+def test_agent_answer_has_only_answer_and_outcome() -> None:
+    result = AgentAnswer(
+        answer="The documents support this answer. [E1]",
+        outcome=AgentAnswerOutcome.ANSWERED,
+    )
+
+    assert result.model_dump() == {
+        "answer": "The documents support this answer. [E1]",
+        "outcome": "answered",
+    }
 
 
 def test_research_context_defaults_are_isolated():
