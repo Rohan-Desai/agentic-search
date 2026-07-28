@@ -14,6 +14,14 @@ from app.models.research import (
 from app.models.schemas import ConversationTurn, SearchMode
 
 
+def test_agent_instructions_require_scoped_recovery_and_no_speculation() -> None:
+    instructions = agentic_search.AGENT_INSTRUCTIONS
+
+    assert "search within that document by ID" in instructions
+    assert "explicitly address every requested part" in instructions
+    assert "assumptions, or speculation" in instructions
+
+
 @pytest.mark.asyncio
 async def test_agent_runs_with_tools_history_scope_and_turn_limit(monkeypatch) -> None:
     captured = {}
