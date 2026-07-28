@@ -21,6 +21,7 @@ def test_agent_instructions_require_scoped_recovery_and_no_speculation() -> None
     assert "explicitly address every requested part" in instructions
     assert "assumptions, or speculation" in instructions
     assert "valid only for the current request" in instructions
+    assert "search again so the answer cites evidence" in instructions
 
 
 def test_agent_input_removes_stale_history_evidence_ids() -> None:
