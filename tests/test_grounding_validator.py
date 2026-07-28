@@ -175,7 +175,11 @@ def test_valid_partial_output_discloses_missing_and_conflicting_requirements() -
                 EvidenceRelationship.CONTRADICTS,
             ),
         ],
-        claims=[claim("duration-claim", ["duration"], ["E1"])],
+        claims=[
+            claim("duration-claim", ["duration"], ["E1"]),
+            claim("eligibility-a", ["eligibility"], ["E2"]),
+            claim("eligibility-b", ["eligibility"], ["E3"]),
+        ],
         missing_requirements=["exceptions"],
         unresolved_conflicts=["eligibility"],
         stop_reason=StopReason.NO_PROGRESS,
@@ -184,6 +188,37 @@ def test_valid_partial_output_discloses_missing_and_conflicting_requirements() -
     result = validate_research_output(context, output)
 
     assert result.valid is True
+
+
+def test_conflicting_requirement_must_expose_claims_from_both_sides() -> None:
+    context = context_with(evidence("E1"), evidence("E2"), evidence("E3"))
+    output = ResearchAgentOutput(
+        resolved_query="Compare both policies.",
+        outcome=ResearchOutcome.PARTIAL,
+        answer="The duration is known, but the eligibility sources conflict.",
+        requirements=[
+            requirement("duration", RequirementStatus.SUPPORTED, ["E1"]),
+            requirement("eligibility", RequirementStatus.CONFLICTING, ["E2", "E3"]),
+        ],
+        evidence_assessments=[
+            assessment("E1", "duration"),
+            assessment("E2", "eligibility"),
+            assessment("E3", "eligibility", EvidenceRelationship.CONTRADICTS),
+        ],
+        claims=[
+            claim("duration-claim", ["duration"], ["E1"]),
+            claim("eligibility-a", ["eligibility"], ["E2"]),
+        ],
+        unresolved_conflicts=["eligibility"],
+        stop_reason=StopReason.NO_PROGRESS,
+    )
+
+    result = validate_research_output(context, output)
+
+    assert (
+        "conflicting requirement eligibility must expose claims from both sides"
+        in result.errors
+    )
 
 
 def test_conflicts_and_missing_coverage_must_be_disclosed_exactly() -> None:
@@ -202,7 +237,11 @@ def test_conflicts_and_missing_coverage_must_be_disclosed_exactly() -> None:
             assessment("E1", "conflict"),
             assessment("E2", "conflict", EvidenceRelationship.CONTRADICTS),
         ],
-        claims=[claim("claim-1", ["known"], ["E1"])],
+        claims=[
+            claim("claim-1", ["known"], ["E1"]),
+            claim("conflict-a", ["conflict"], ["E1"]),
+            claim("conflict-b", ["conflict"], ["E2"]),
+        ],
         stop_reason=StopReason.NO_PROGRESS,
     )
 

@@ -174,6 +174,7 @@ def validate_research_output(
             )
 
     claims_by_requirement = defaultdict(list)
+    claimed_relationships_by_requirement = defaultdict(set)
     for claim in output.claims:
         unknown_requirements = sorted(
             set(claim.requirement_ids) - set(requirement_by_id)
@@ -201,13 +202,30 @@ def validate_research_output(
             ]
             if not any(
                 assessment is not None
-                and assessment.relationship in _CLAIM_GROUNDING_RELATIONSHIPS
+                and (
+                    assessment.relationship in _CLAIM_GROUNDING_RELATIONSHIPS
+                    or (
+                        assessment.relationship
+                        is EvidenceRelationship.CONTRADICTS
+                        and requirement_by_id.get(assessment.requirement_id)
+                        is not None
+                        and requirement_by_id[
+                            assessment.requirement_id
+                        ].status
+                        is RequirementStatus.CONFLICTING
+                    )
+                )
                 for assessment in matching_assessments
             ):
                 errors.append(
                     f"claim {claim.claim_id} evidence {evidence_id} is not "
                     "grounded in a referenced requirement"
                 )
+            for assessment in matching_assessments:
+                if assessment is not None:
+                    claimed_relationships_by_requirement[
+                        assessment.requirement_id
+                    ].add(assessment.relationship)
             evidence = evidence_by_id.get(evidence_id)
             if evidence is not None and evidence.status is EvidenceStatus.REJECTED:
                 errors.append(
@@ -227,6 +245,18 @@ def validate_research_output(
                 f"supported requirement {requirement.requirement_id} has no "
                 "material claim"
             )
+        elif requirement.status is RequirementStatus.CONFLICTING:
+            claimed_relationships = claimed_relationships_by_requirement[
+                requirement.requirement_id
+            ]
+            if not {
+                EvidenceRelationship.SUPPORTS,
+                EvidenceRelationship.CONTRADICTS,
+            } <= claimed_relationships:
+                errors.append(
+                    f"conflicting requirement {requirement.requirement_id} must "
+                    "expose claims from both sides"
+                )
 
     missing_ids = set(output.missing_requirements)
     conflict_ids = set(output.unresolved_conflicts)

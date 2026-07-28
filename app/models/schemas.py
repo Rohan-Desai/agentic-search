@@ -39,6 +39,9 @@ class Citation(BaseModel):
     chunk_id: str | None = None
     snippet: str | None = None
     score: float | None = None
+    page: int | None = None
+    sheet: str | None = None
+    section: str | None = None
 
 
 class ConversationTurn(BaseModel):
@@ -83,4 +86,8 @@ class SearchResponse(BaseModel):
     answer_found: bool = Field(
         default=True,
         description="False if the documents do not contain the answer.",
+    )
+    partial: bool = Field(
+        default=False,
+        description="True when supported findings exist but coverage is incomplete.",
     )
