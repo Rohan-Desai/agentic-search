@@ -179,6 +179,23 @@ class ContextInspectionResult(BaseModel):
     error_code: str | None = None
 
 
+class DocumentCatalogItem(BaseModel):
+    """One document available within the current request's scope."""
+
+    doc_id: str = Field(..., min_length=1)
+    filename: str = Field(..., min_length=1)
+    chunk_count: int = Field(..., ge=1)
+
+
+class DocumentListResult(BaseModel):
+    """Structured result of listing searchable documents."""
+
+    status: AttemptStatus
+    documents: list[DocumentCatalogItem] = Field(default_factory=list)
+    truncated: bool = False
+    error_code: str | None = None
+
+
 class MaterialClaim(BaseModel):
     """A factual statement proposed for the final answer."""
 

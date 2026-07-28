@@ -9,8 +9,13 @@ from app.agents.evidence_ledger import EvidenceLedger
 from app.models.research import (
     AttemptStatus,
     ContextInspectionResult,
+    DocumentListResult,
     EvidenceSearchResult,
     ResearchContext,
+)
+from app.services.document_catalog_service import (
+    DocumentCatalogError,
+    execute_document_list,
 )
 from app.services.retrieval_service import (
     RetrievalExecutionError,
@@ -103,6 +108,21 @@ def run_inspect_evidence_context(
         )
 
 
+def run_list_documents(tool_context: AgentToolContext) -> DocumentListResult:
+    """Execute corpus discovery as ordinary application code."""
+
+    try:
+        return execute_document_list(
+            context=tool_context.research,
+            store=tool_context.store,
+        )
+    except DocumentCatalogError:
+        return DocumentListResult(
+            status=AttemptStatus.FAILED,
+            error_code="document_catalog_failed",
+        )
+
+
 @function_tool
 def search_evidence(
     wrapper: RunContextWrapper[AgentToolContext],
@@ -160,4 +180,20 @@ def inspect_evidence_context(
     return result.model_dump_json()
 
 
-AGENTIC_RESEARCH_TOOLS = [search_evidence, inspect_evidence_context]
+@function_tool
+def list_documents(wrapper: RunContextWrapper[AgentToolContext]) -> str:
+    """List documents available within the current authorized search scope.
+
+    Use this to discover filenames and document IDs before a document-specific
+    search or comparison. Catalog entries describe corpus scope; they are not
+    evidence for claims about document contents.
+    """
+
+    return run_list_documents(wrapper.context).model_dump_json()
+
+
+AGENTIC_RESEARCH_TOOLS = [
+    search_evidence,
+    inspect_evidence_context,
+    list_documents,
+]

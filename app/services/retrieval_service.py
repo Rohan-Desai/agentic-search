@@ -17,7 +17,7 @@ from app.models.research import (
     ResearchContext,
     SearchAttempt,
 )
-from app.services.vector_store import SearchHit, StoredChunk, get_vector_store
+from app.services.vector_store import IndexedDocument, SearchHit, StoredChunk, get_vector_store
 
 _MIN_TOP_K = 1
 _MAX_TOP_K = 20
@@ -41,6 +41,8 @@ class SearchStore(Protocol):
         before: int = 1,
         after: int = 1,
     ) -> list[StoredChunk]: ...
+
+    def list_documents(self, doc_ids: list[str] | None = None) -> list[IndexedDocument]: ...
 
 
 class RetrievalExecutionError(RuntimeError):
