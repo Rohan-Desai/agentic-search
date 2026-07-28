@@ -1,0 +1,21 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+data/uploads/*
+!data/uploads/.gitkeep
+data/chroma/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+.DS_Store
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# Seed corpus documents (provided separately; keep folder + docs out of git if large)
+data/seed_corpus/*
+!data/seed_corpus/.gitkeep
+!data/seed_corpus/README.md
