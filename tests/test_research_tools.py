@@ -1,0 +1,167 @@
+"""Tests for request-scoped OpenAI Agents SDK research tools."""
+import json
+
+import pytest
+from agents import RunContextWrapper
+
+from app.agents.evidence_ledger import EvidenceLedger
+from app.agents.research_tools import (
+    AgentToolContext,
+    run_search_evidence,
+    search_evidence,
+)
+from app.models.research import AttemptStatus, EvidenceSearchResult, ResearchContext
+from app.services.vector_store import SearchHit
+
+
+class FakeStore:
+    def __init__(
+        self,
+        hits: list[SearchHit] | None = None,
+        error: Exception | None = None,
+    ) -> None:
+        self.hits = hits or []
+        self.error = error
+        self.calls: list[dict[str, object]] = []
+
+    def search(
+        self,
+        query: str,
+        top_k: int = 5,
+        doc_ids: list[str] | None = None,
+    ) -> list[SearchHit]:
+        self.calls.append({"query": query, "top_k": top_k, "doc_ids": doc_ids})
+        if self.error:
+            raise self.error
+        return self.hits
+
+
+def hit(doc_id: str = "doc-1", chunk_id: str = "doc-1::0") -> SearchHit:
+    return SearchHit(
+        doc_id=doc_id,
+        filename="operations.docx",
+        chunk_id=chunk_id,
+        text="Coral Bay available capacity was 82 MW.",
+        score=0.91,
+        order=0,
+    )
+
+
+def research_context(
+    request_id: str = "req-1",
+    authorized_doc_ids: list[str] | None = None,
+) -> ResearchContext:
+    return ResearchContext(
+        request_id=request_id,
+        original_query="What was Coral Bay's available capacity?",
+        authorized_doc_ids=authorized_doc_ids,
+    )
+
+
+def test_tool_schema_exposes_only_model_controlled_arguments():
+    properties = search_evidence.params_json_schema["properties"]
+
+    assert set(properties) == {"query", "doc_ids", "top_k"}
+    assert "wrapper" not in properties
+    assert "context" not in properties
+    assert search_evidence.name == "search_evidence"
+
+
+def test_application_handler_updates_request_scoped_state():
+    research = research_context(authorized_doc_ids=["doc-1"])
+    tool_context = AgentToolContext.create(research, store=FakeStore([hit()]))
+
+    result = run_search_evidence(
+        tool_context,
+        query="Coral Bay derated capacity",
+        doc_ids=["doc-1"],
+        top_k=3,
+    )
+
+    assert result.status is AttemptStatus.SUCCEEDED
+    assert result.evidence[0].evidence_id == "E1"
+    assert research.evidence[0].evidence_id == "E1"
+    assert research.attempts[0].result_evidence_ids == ["E1"]
+    assert research.usage.searches == 1
+
+
+@pytest.mark.asyncio
+async def test_sdk_tool_invocation_returns_structured_json():
+    research = research_context()
+    tool_context = AgentToolContext.create(research, store=FakeStore([hit()]))
+    wrapper = RunContextWrapper(context=tool_context)
+
+    output = await search_evidence.on_invoke_tool(
+        wrapper,
+        json.dumps(
+            {
+                "query": "Coral Bay capacity",
+                "doc_ids": None,
+                "top_k": 5,
+            }
+        ),
+    )
+    result = EvidenceSearchResult.model_validate_json(output)
+
+    assert result.status is AttemptStatus.SUCCEEDED
+    assert result.evidence[0].evidence_id == "E1"
+    assert result.new_evidence_count == 1
+
+
+def test_tool_contexts_keep_research_runs_isolated():
+    first_research = research_context("req-1")
+    second_research = research_context("req-2")
+    first = AgentToolContext.create(first_research, store=FakeStore([hit()]))
+    second = AgentToolContext.create(
+        second_research,
+        store=FakeStore([hit(doc_id="doc-2", chunk_id="doc-2::0")]),
+    )
+
+    run_search_evidence(first, query="first query")
+    run_search_evidence(second, query="second query")
+
+    assert [item.doc_id for item in first_research.evidence] == ["doc-1"]
+    assert [item.doc_id for item in second_research.evidence] == ["doc-2"]
+    assert first_research.evidence is not second_research.evidence
+
+
+def test_tool_returns_safe_structured_failure():
+    research = research_context()
+    tool_context = AgentToolContext.create(
+        research,
+        store=FakeStore(error=RuntimeError("private provider detail")),
+    )
+
+    result = run_search_evidence(tool_context, query="query")
+
+    assert result.status is AttemptStatus.FAILED
+    assert result.error_code == "retrieval_failed"
+    assert "private provider detail" not in result.model_dump_json()
+    assert research.attempts[0].status is AttemptStatus.FAILED
+
+
+def test_tool_cannot_widen_authorized_scope():
+    research = research_context(authorized_doc_ids=["doc-1"])
+    store = FakeStore([hit()])
+    tool_context = AgentToolContext.create(research, store=store)
+
+    result = run_search_evidence(
+        tool_context,
+        query="query",
+        doc_ids=["doc-2"],
+    )
+
+    assert result.status is AttemptStatus.INVALID
+    assert result.error_code == "scope_not_authorized"
+    assert store.calls == []
+
+
+def test_tool_context_rejects_ledger_from_another_request():
+    first = research_context("req-1")
+    second = research_context("req-2")
+
+    with pytest.raises(ValueError, match="same research context"):
+        AgentToolContext(
+            research=first,
+            ledger=EvidenceLedger(second),
+        )
