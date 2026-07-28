@@ -5,7 +5,7 @@ import asyncio
 from collections.abc import Awaitable, Callable
 
 from agents.exceptions import AgentsException, MaxTurnsExceeded
-from openai import APIError
+from openai import OpenAIError
 from pydantic import ValidationError
 
 from app.agents.research_agent import (
@@ -108,7 +108,7 @@ async def execute_agentic_search(
             "The research result could not be safely validated.",
             502,
         ) from exc
-    except (AgentsException, APIError) as exc:
+    except (AgentsException, OpenAIError) as exc:
         raise AgenticSearchRuntimeError(
             "model_provider_failed",
             "The research model is temporarily unavailable.",

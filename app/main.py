@@ -6,9 +6,11 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import documents, health, search
+from app.core.agents_sdk import configure_agents_sdk
 from app.core.logging import configure_logging
 
 configure_logging()
+configure_agents_sdk()
 
 app = FastAPI(
     title="Agentic Document Search",
