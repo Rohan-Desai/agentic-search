@@ -287,6 +287,7 @@ class ResearchContext(BaseModel):
     resolved_query: str | None = None
     history: list[ConversationTurn] = Field(default_factory=list)
     authorized_doc_ids: list[str] | None = None
+    retrieval_top_k: int = Field(default=5, ge=1, le=20)
     requirements: list[AnswerRequirement] = Field(default_factory=list)
     evidence: list[EvidenceRecord] = Field(default_factory=list)
     evidence_assessments: list[EvidenceAssessment] = Field(default_factory=list)
