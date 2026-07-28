@@ -235,6 +235,7 @@ classDiagram
     class SearchAttempt {
         query
         requested_scope
+        effective_scope
         tool_name
         result_ids
         new_evidence_count

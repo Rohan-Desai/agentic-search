@@ -26,6 +26,7 @@ class SearchHit:
     chunk_id: str
     text: str
     score: float
+    order: int | None = None
 
 
 class VectorStore:
@@ -87,6 +88,7 @@ class VectorStore:
                     chunk_id=cid,
                     text=text,
                     score=1.0 - float(dist),  # cosine distance -> similarity
+                    order=int(meta["order"]) if meta.get("order") is not None else None,
                 )
             )
         return hits

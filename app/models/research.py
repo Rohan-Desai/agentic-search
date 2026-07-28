@@ -137,10 +137,35 @@ class SearchAttempt(BaseModel):
     tool_name: str = Field(..., min_length=1)
     query: str | None = None
     requested_doc_ids: list[str] | None = None
+    effective_doc_ids: list[str] | None = None
     result_evidence_ids: list[str] = Field(default_factory=list)
     new_evidence_count: int = Field(default=0, ge=0)
     duration_ms: int | None = Field(default=None, ge=0)
     status: AttemptStatus = AttemptStatus.SUCCEEDED
+    error_code: str | None = None
+
+
+class EvidenceSearchItem(BaseModel):
+    """One current-query result returned by structured retrieval."""
+
+    evidence_id: str = Field(..., min_length=1)
+    doc_id: str = Field(..., min_length=1)
+    filename: str = Field(..., min_length=1)
+    chunk_id: str = Field(..., min_length=1)
+    text: str = Field(..., min_length=1)
+    retrieval_score: float | None = None
+    location: EvidenceLocation = Field(default_factory=EvidenceLocation)
+    is_new: bool
+
+
+class EvidenceSearchResult(BaseModel):
+    """Structured result of one bounded evidence search."""
+
+    status: AttemptStatus
+    query: str = Field(..., min_length=1)
+    effective_doc_ids: list[str] | None = None
+    evidence: list[EvidenceSearchItem] = Field(default_factory=list)
+    new_evidence_count: int = Field(default=0, ge=0)
     error_code: str | None = None
 
 
