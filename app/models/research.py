@@ -81,6 +81,25 @@ class EvidenceLocation(BaseModel):
     chunk_order: int | None = Field(default=None, ge=0)
 
 
+class EvidenceDiscovery(BaseModel):
+    """One retrieval event that surfaced a passage."""
+
+    query: str = Field(..., min_length=1)
+    retrieval_score: float | None = None
+
+
+class EvidenceCandidate(BaseModel):
+    """Structured passage returned by retrieval before ledger registration."""
+
+    doc_id: str = Field(..., min_length=1)
+    filename: str = Field(..., min_length=1)
+    chunk_id: str = Field(..., min_length=1)
+    text: str = Field(..., min_length=1)
+    query: str = Field(..., min_length=1)
+    retrieval_score: float | None = None
+    location: EvidenceLocation = Field(default_factory=EvidenceLocation)
+
+
 class EvidenceRecord(BaseModel):
     """One retrieved passage and its provenance."""
 
@@ -89,10 +108,9 @@ class EvidenceRecord(BaseModel):
     filename: str = Field(..., min_length=1)
     chunk_id: str = Field(..., min_length=1)
     text: str = Field(..., min_length=1)
-    query: str = Field(..., min_length=1)
-    retrieval_score: float | None = None
     location: EvidenceLocation = Field(default_factory=EvidenceLocation)
     status: EvidenceStatus = EvidenceStatus.CANDIDATE
+    discoveries: list[EvidenceDiscovery] = Field(..., min_length=1)
 
 
 class AnswerRequirement(BaseModel):

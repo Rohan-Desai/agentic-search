@@ -249,8 +249,12 @@ classDiagram
         chunk_id
         location
         text
-        retrieval_score
         evidence_status
+    }
+
+    class EvidenceDiscovery {
+        query
+        retrieval_score
     }
 
     class EvidenceAssessment {
@@ -284,6 +288,7 @@ classDiagram
     ResearchContext "1" *-- "0..1" ValidationResult
     EvidenceAssessment "*" --> "1" AnswerRequirement
     EvidenceAssessment "*" --> "1" EvidenceRecord
+    EvidenceRecord "1" *-- "*" EvidenceDiscovery
     MaterialClaim "*" --> "*" EvidenceRecord
     MaterialClaim "*" --> "*" AnswerRequirement
 ```
