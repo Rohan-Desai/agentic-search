@@ -11,11 +11,3 @@ def test_health():
     assert r.status_code == 200
     assert r.json()["status"] == "ok"
 
-
-def test_agentic_mode_is_stubbed():
-    # Agentic mode is intentionally a stub until the candidate implements it.
-    # TestClient re-raises server exceptions, so we assert it raises here.
-    import pytest
-
-    with pytest.raises(NotImplementedError):
-        client.post("/search", json={"query": "hello", "mode": "agentic"})
