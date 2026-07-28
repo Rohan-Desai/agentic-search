@@ -7,11 +7,18 @@ from agents import RunContextWrapper
 from app.agents.evidence_ledger import EvidenceLedger
 from app.agents.research_tools import (
     AgentToolContext,
+    inspect_evidence_context,
+    run_inspect_evidence_context,
     run_search_evidence,
     search_evidence,
 )
-from app.models.research import AttemptStatus, EvidenceSearchResult, ResearchContext
-from app.services.vector_store import SearchHit
+from app.models.research import (
+    AttemptStatus,
+    ContextInspectionResult,
+    EvidenceSearchResult,
+    ResearchContext,
+)
+from app.services.vector_store import SearchHit, StoredChunk
 
 
 class FakeStore:
@@ -19,9 +26,13 @@ class FakeStore:
         self,
         hits: list[SearchHit] | None = None,
         error: Exception | None = None,
+        context_chunks: list[StoredChunk] | None = None,
+        context_error: Exception | None = None,
     ) -> None:
         self.hits = hits or []
         self.error = error
+        self.context_chunks = context_chunks or []
+        self.context_error = context_error
         self.calls: list[dict[str, object]] = []
 
     def search(
@@ -34,6 +45,17 @@ class FakeStore:
         if self.error:
             raise self.error
         return self.hits
+
+    def get_context(
+        self,
+        doc_id: str,
+        chunk_order: int,
+        before: int = 1,
+        after: int = 1,
+    ) -> list[StoredChunk]:
+        if self.context_error:
+            raise self.context_error
+        return self.context_chunks
 
 
 def hit(doc_id: str = "doc-1", chunk_id: str = "doc-1::0") -> SearchHit:
@@ -165,3 +187,63 @@ def test_tool_context_rejects_ledger_from_another_request():
             research=first,
             ledger=EvidenceLedger(second),
         )
+
+
+def test_context_tool_schema_exposes_only_bounded_lookup_arguments():
+    properties = inspect_evidence_context.params_json_schema["properties"]
+
+    assert set(properties) == {"evidence_id", "before", "after"}
+    assert "wrapper" not in properties
+
+
+@pytest.mark.asyncio
+async def test_sdk_context_tool_registers_neighboring_evidence():
+    research = research_context()
+    store = FakeStore(
+        hits=[hit()],
+        context_chunks=[
+            StoredChunk(
+                doc_id="doc-1",
+                filename="operations.docx",
+                chunk_id="doc-1::0",
+                text=hit().text,
+                order=0,
+            ),
+            StoredChunk(
+                doc_id="doc-1",
+                filename="operations.docx",
+                chunk_id="doc-1::1",
+                text="The derating began in March.",
+                order=1,
+            ),
+        ],
+    )
+    tool_context = AgentToolContext.create(research, store=store)
+    source_id = run_search_evidence(tool_context, query="capacity").evidence[0].evidence_id
+    wrapper = RunContextWrapper(context=tool_context)
+
+    output = await inspect_evidence_context.on_invoke_tool(
+        wrapper,
+        json.dumps({"evidence_id": source_id, "before": 1, "after": 1}),
+    )
+    result = ContextInspectionResult.model_validate_json(output)
+
+    assert result.status is AttemptStatus.SUCCEEDED
+    assert result.new_evidence_count == 1
+    assert [item.evidence_id for item in result.evidence] == ["E1", "E2"]
+
+
+def test_context_tool_returns_safe_failure():
+    research = research_context()
+    store = FakeStore(hits=[hit()], context_error=RuntimeError("private detail"))
+    tool_context = AgentToolContext.create(research, store=store)
+    source_id = run_search_evidence(tool_context, query="capacity").evidence[0].evidence_id
+
+    result = run_inspect_evidence_context(
+        tool_context,
+        evidence_id=source_id,
+    )
+
+    assert result.status is AttemptStatus.FAILED
+    assert result.error_code == "context_retrieval_failed"
+    assert "private detail" not in result.model_dump_json()

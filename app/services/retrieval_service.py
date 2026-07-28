@@ -6,8 +6,10 @@ from time import perf_counter
 from typing import Protocol
 
 from app.agents.evidence_ledger import EvidenceLedger
+from app.agents.evidence_ledger import UnknownEvidenceError
 from app.models.research import (
     AttemptStatus,
+    ContextInspectionResult,
     EvidenceCandidate,
     EvidenceLocation,
     EvidenceSearchItem,
@@ -15,10 +17,11 @@ from app.models.research import (
     ResearchContext,
     SearchAttempt,
 )
-from app.services.vector_store import SearchHit, get_vector_store
+from app.services.vector_store import SearchHit, StoredChunk, get_vector_store
 
 _MIN_TOP_K = 1
 _MAX_TOP_K = 20
+_MAX_CONTEXT_WINDOW = 2
 
 
 class SearchStore(Protocol):
@@ -30,6 +33,14 @@ class SearchStore(Protocol):
         top_k: int = 5,
         doc_ids: list[str] | None = None,
     ) -> list[SearchHit]: ...
+
+    def get_context(
+        self,
+        doc_id: str,
+        chunk_order: int,
+        before: int = 1,
+        after: int = 1,
+    ) -> list[StoredChunk]: ...
 
 
 class RetrievalExecutionError(RuntimeError):
@@ -53,12 +64,14 @@ def execute_evidence_search(
     )
     bounded_top_k = max(_MIN_TOP_K, min(top_k, _MAX_TOP_K))
     started_at = clock()
+    context.usage.tool_calls += 1
     context.usage.searches += 1
 
     if not scope_valid:
         duration_ms = _elapsed_ms(started_at, clock)
         _record_attempt(
             context=context,
+            tool_name="search_evidence",
             query=query,
             requested_doc_ids=requested_doc_ids,
             effective_doc_ids=[],
@@ -84,6 +97,7 @@ def execute_evidence_search(
         duration_ms = _elapsed_ms(started_at, clock)
         _record_attempt(
             context=context,
+            tool_name="search_evidence",
             query=query,
             requested_doc_ids=requested_doc_ids,
             effective_doc_ids=effective_doc_ids,
@@ -124,6 +138,7 @@ def execute_evidence_search(
     duration_ms = _elapsed_ms(started_at, clock)
     _record_attempt(
         context=context,
+        tool_name="search_evidence",
         query=query,
         requested_doc_ids=requested_doc_ids,
         effective_doc_ids=effective_doc_ids,
@@ -136,6 +151,146 @@ def execute_evidence_search(
         status=status,
         query=query,
         effective_doc_ids=effective_doc_ids,
+        evidence=items,
+        new_evidence_count=new_evidence_count,
+    )
+
+
+def execute_context_inspection(
+    *,
+    context: ResearchContext,
+    ledger: EvidenceLedger,
+    evidence_id: str,
+    before: int = 1,
+    after: int = 1,
+    store: SearchStore | None = None,
+    clock: Callable[[], float] = perf_counter,
+) -> ContextInspectionResult:
+    """Retrieve and register a bounded window around known evidence."""
+
+    bounded_before = max(0, min(before, _MAX_CONTEXT_WINDOW))
+    bounded_after = max(0, min(after, _MAX_CONTEXT_WINDOW))
+    started_at = clock()
+    context.usage.tool_calls += 1
+
+    try:
+        source = ledger.get(evidence_id)
+    except UnknownEvidenceError:
+        _record_attempt(
+            context=context,
+            tool_name="inspect_evidence_context",
+            query=None,
+            requested_doc_ids=None,
+            effective_doc_ids=None,
+            status=AttemptStatus.INVALID,
+            duration_ms=_elapsed_ms(started_at, clock),
+            error_code="unknown_evidence",
+        )
+        return ContextInspectionResult(
+            status=AttemptStatus.INVALID,
+            source_evidence_id=evidence_id,
+            error_code="unknown_evidence",
+        )
+
+    if source.location.chunk_order is None:
+        _record_attempt(
+            context=context,
+            tool_name="inspect_evidence_context",
+            query=None,
+            requested_doc_ids=[source.doc_id],
+            effective_doc_ids=[source.doc_id],
+            status=AttemptStatus.INVALID,
+            duration_ms=_elapsed_ms(started_at, clock),
+            error_code="missing_chunk_order",
+        )
+        return ContextInspectionResult(
+            status=AttemptStatus.INVALID,
+            source_evidence_id=evidence_id,
+            error_code="missing_chunk_order",
+        )
+
+    if (
+        context.authorized_doc_ids is not None
+        and source.doc_id not in context.authorized_doc_ids
+    ):
+        _record_attempt(
+            context=context,
+            tool_name="inspect_evidence_context",
+            query=None,
+            requested_doc_ids=[source.doc_id],
+            effective_doc_ids=[],
+            status=AttemptStatus.INVALID,
+            duration_ms=_elapsed_ms(started_at, clock),
+            error_code="evidence_outside_scope",
+        )
+        return ContextInspectionResult(
+            status=AttemptStatus.INVALID,
+            source_evidence_id=evidence_id,
+            error_code="evidence_outside_scope",
+        )
+
+    search_store = store or get_vector_store()
+    try:
+        chunks = search_store.get_context(
+            doc_id=source.doc_id,
+            chunk_order=source.location.chunk_order,
+            before=bounded_before,
+            after=bounded_after,
+        )
+    except Exception as exc:
+        _record_attempt(
+            context=context,
+            tool_name="inspect_evidence_context",
+            query=None,
+            requested_doc_ids=[source.doc_id],
+            effective_doc_ids=[source.doc_id],
+            status=AttemptStatus.FAILED,
+            duration_ms=_elapsed_ms(started_at, clock),
+            error_code="context_retrieval_failed",
+        )
+        raise RetrievalExecutionError("Evidence context retrieval failed.") from exc
+
+    discovery_query = f"context:{evidence_id}"
+    candidates = [
+        EvidenceCandidate(
+            doc_id=chunk.doc_id,
+            filename=chunk.filename,
+            chunk_id=chunk.chunk_id,
+            text=chunk.text,
+            query=discovery_query,
+            location=EvidenceLocation(chunk_order=chunk.order),
+        )
+        for chunk in chunks
+    ]
+    additions = ledger.add_many(candidates)
+    items = [
+        EvidenceSearchItem(
+            evidence_id=addition.evidence_id,
+            doc_id=chunk.doc_id,
+            filename=chunk.filename,
+            chunk_id=chunk.chunk_id,
+            text=chunk.text,
+            location=EvidenceLocation(chunk_order=chunk.order),
+            is_new=addition.is_new,
+        )
+        for chunk, addition in zip(chunks, additions)
+    ]
+    new_evidence_count = sum(item.is_new for item in additions)
+    status = AttemptStatus.SUCCEEDED if items else AttemptStatus.EMPTY
+    _record_attempt(
+        context=context,
+        tool_name="inspect_evidence_context",
+        query=None,
+        requested_doc_ids=[source.doc_id],
+        effective_doc_ids=[source.doc_id],
+        status=status,
+        duration_ms=_elapsed_ms(started_at, clock),
+        result_evidence_ids=[item.evidence_id for item in items],
+        new_evidence_count=new_evidence_count,
+    )
+    return ContextInspectionResult(
+        status=status,
+        source_evidence_id=evidence_id,
         evidence=items,
         new_evidence_count=new_evidence_count,
     )
@@ -172,6 +327,7 @@ def _elapsed_ms(started_at: float, clock: Callable[[], float]) -> int:
 def _record_attempt(
     *,
     context: ResearchContext,
+    tool_name: str,
     query: str,
     requested_doc_ids: list[str] | None,
     effective_doc_ids: list[str] | None,
@@ -183,7 +339,7 @@ def _record_attempt(
 ) -> None:
     context.attempts.append(
         SearchAttempt(
-            tool_name="search_evidence",
+            tool_name=tool_name,
             query=query,
             requested_doc_ids=requested_doc_ids,
             effective_doc_ids=effective_doc_ids,

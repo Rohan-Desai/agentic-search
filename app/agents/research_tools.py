@@ -6,10 +6,16 @@ from dataclasses import dataclass
 from agents import RunContextWrapper, function_tool
 
 from app.agents.evidence_ledger import EvidenceLedger
-from app.models.research import AttemptStatus, EvidenceSearchResult, ResearchContext
+from app.models.research import (
+    AttemptStatus,
+    ContextInspectionResult,
+    EvidenceSearchResult,
+    ResearchContext,
+)
 from app.services.retrieval_service import (
     RetrievalExecutionError,
     SearchStore,
+    execute_context_inspection,
     execute_evidence_search,
 )
 
@@ -70,6 +76,33 @@ def run_search_evidence(
         )
 
 
+def run_inspect_evidence_context(
+    tool_context: AgentToolContext,
+    *,
+    evidence_id: str,
+    before: int = 1,
+    after: int = 1,
+) -> ContextInspectionResult:
+    """Execute bounded context inspection as ordinary application code."""
+
+    try:
+        return execute_context_inspection(
+            context=tool_context.research,
+            ledger=tool_context.ledger,
+            evidence_id=evidence_id,
+            before=before,
+            after=after,
+            store=tool_context.store,
+        )
+    except RetrievalExecutionError:
+        attempt = tool_context.research.attempts[-1]
+        return ContextInspectionResult(
+            status=AttemptStatus.FAILED,
+            source_evidence_id=evidence_id,
+            error_code=attempt.error_code,
+        )
+
+
 @function_tool
 def search_evidence(
     wrapper: RunContextWrapper[AgentToolContext],
@@ -99,4 +132,32 @@ def search_evidence(
     return result.model_dump_json()
 
 
-AGENTIC_RESEARCH_TOOLS = [search_evidence]
+@function_tool
+def inspect_evidence_context(
+    wrapper: RunContextWrapper[AgentToolContext],
+    evidence_id: str,
+    before: int = 1,
+    after: int = 1,
+) -> str:
+    """Inspect a small window of chunks around already retrieved evidence.
+
+    Use this when an isolated passage needs headings, caveats, definitions, or
+    adjacent table context. The application limits the window and keeps the
+    inspection inside the evidence's authorized source document.
+
+    Args:
+        evidence_id: Stable evidence ID returned by search_evidence.
+        before: Requested chunks before the source passage (0-2).
+        after: Requested chunks after the source passage (0-2).
+    """
+
+    result = run_inspect_evidence_context(
+        wrapper.context,
+        evidence_id=evidence_id,
+        before=before,
+        after=after,
+    )
+    return result.model_dump_json()
+
+
+AGENTIC_RESEARCH_TOOLS = [search_evidence, inspect_evidence_context]
