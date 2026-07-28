@@ -20,6 +20,27 @@ def test_agent_instructions_require_scoped_recovery_and_no_speculation() -> None
     assert "search within that document by ID" in instructions
     assert "explicitly address every requested part" in instructions
     assert "assumptions, or speculation" in instructions
+    assert "valid only for the current request" in instructions
+
+
+def test_agent_input_removes_stale_history_evidence_ids() -> None:
+    prompt = agentic_search.build_agent_input(
+        "Which one has the higher price?",
+        [
+            ConversationTurn(
+                role="assistant",
+                content="Redhawk is $41.50/MWh [E1, E2].",
+            ),
+            ConversationTurn(
+                role="user",
+                content="What about Coral Bay?",
+            ),
+        ],
+    )
+
+    assert "Redhawk is $41.50/MWh ." in prompt
+    assert "[E1, E2]" not in prompt
+    assert "What about Coral Bay?" in prompt
 
 
 @pytest.mark.asyncio

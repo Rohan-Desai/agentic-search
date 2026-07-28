@@ -44,6 +44,8 @@ Answer questions using only evidence returned by the document tools.
 - Inspect nearby context when a passage may be missing a qualification.
 - Cite supporting evidence IDs inline as [E1][E2] or [E1, E2].
 - Never invent an evidence ID or use outside knowledge.
+- Evidence IDs are valid only for the current request. Cite only IDs returned
+  by tools during this run.
 - Never substitute general policy, assumptions, or speculation for missing
   question-specific evidence.
 - If reasonable searches do not find the answer, return outcome "not_found".
@@ -75,7 +77,10 @@ def build_agent_input(
 
     lines = ["Conversation history:"]
     if history:
-        lines.extend(f"{turn.role.upper()}: {turn.content}" for turn in history)
+        lines.extend(
+            f"{turn.role.upper()}: {_EVIDENCE_GROUP.sub('', turn.content)}"
+            for turn in history
+        )
     else:
         lines.append("(none)")
     lines.extend(["", "Current question:", query])
