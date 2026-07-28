@@ -64,6 +64,15 @@ class StopReason(str, Enum):
     ERROR = "error"
 
 
+class ResearchOutcome(str, Enum):
+    """User-facing shape of the research result."""
+
+    COMPLETE = "complete"
+    PARTIAL = "partial"
+    CLARIFICATION = "clarification"
+    NOT_FOUND = "not_found"
+
+
 class ClaimType(str, Enum):
     """How a material claim relates to its supporting evidence."""
 
@@ -213,6 +222,24 @@ class ValidationResult(BaseModel):
     errors: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     repair_allowed: bool = False
+
+
+class ResearchAgentOutput(BaseModel):
+    """Structured proposal returned by the research agent.
+
+    This is not yet a publishable API response. A later validation layer must
+    verify its references and grounding before the answer reaches a user.
+    """
+
+    resolved_query: str = Field(..., min_length=1)
+    outcome: ResearchOutcome
+    answer: str = Field(..., min_length=1)
+    requirements: list[AnswerRequirement] = Field(default_factory=list)
+    evidence_assessments: list[EvidenceAssessment] = Field(default_factory=list)
+    claims: list[MaterialClaim] = Field(default_factory=list)
+    missing_requirements: list[str] = Field(default_factory=list)
+    unresolved_conflicts: list[str] = Field(default_factory=list)
+    stop_reason: StopReason
 
 
 class ResearchBudget(BaseModel):

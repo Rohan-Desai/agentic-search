@@ -36,7 +36,7 @@ from agents import Agent  # noqa: F401 — available for your implementation
 
 from app.agents.base import default_model, run_agent  # noqa: F401
 from app.agents.tools import RETRIEVAL_TOOLS  # noqa: F401
-from app.models.schemas import ConversationTurn, SearchMode, SearchResponse
+from app.models.schemas import ConversationTurn, SearchResponse
 
 
 async def run_agentic_search(
