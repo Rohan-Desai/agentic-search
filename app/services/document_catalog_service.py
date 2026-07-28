@@ -12,6 +12,7 @@ from app.models.research import (
     SearchAttempt,
 )
 from app.services.retrieval_service import SearchStore
+from app.services.research_budget_service import reserve_tool_call
 from app.services.vector_store import get_vector_store
 
 _MAX_DOCUMENTS = 100
@@ -30,8 +31,20 @@ def execute_document_list(
     """List documents inside the request's authorized scope."""
 
     started_at = clock()
-    context.usage.tool_calls += 1
     effective_doc_ids = context.authorized_doc_ids
+    budget_error = reserve_tool_call(context)
+    if budget_error:
+        _record_attempt(
+            context=context,
+            effective_doc_ids=effective_doc_ids,
+            status=AttemptStatus.INVALID,
+            duration_ms=_elapsed_ms(started_at, clock),
+            error_code=budget_error,
+        )
+        return DocumentListResult(
+            status=AttemptStatus.INVALID,
+            error_code=budget_error,
+        )
 
     if effective_doc_ids == []:
         _record_attempt(

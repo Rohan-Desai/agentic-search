@@ -8,6 +8,9 @@ export interface Citation {
   chunk_id?: string | null;
   snippet?: string | null;
   score?: number | null;
+  page?: number | null;
+  sheet?: string | null;
+  section?: string | null;
 }
 
 export interface AgentStep {
@@ -36,6 +39,7 @@ export interface SearchResponse {
   steps: AgentStep[];
   clarification_needed: boolean;
   answer_found: boolean;
+  partial: boolean;
 }
 
 export async function uploadDocuments(files: File[]): Promise<IngestedDocument[]> {

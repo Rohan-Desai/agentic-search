@@ -1,42 +1,119 @@
-"""MODE 2: Agentic search  --  ★ CANDIDATE IMPLEMENTS THIS ★
-
-Unlike normal search, the agent should decide *for itself* how to retrieve
-information: reformulating queries, calling the retrieval tools one or more
-times, deciding when it has enough evidence, and synthesizing a grounded,
-cited answer.
-
-You have working tools available in app/agents/tools.py:
-  - search_documents(query, top_k)
-  - search_within_documents(query, doc_ids, top_k)
-
-Suggested approach (not prescriptive):
-  1. Build an `Agent` with clear instructions and `tools=RETRIEVAL_TOOLS`.
-  2. Let the agent iterate (the SDK Runner handles the tool loop).
-  3. Use run_agent() from app.agents.base to run it and capture the trace.
-  4. Populate citations from the tool outputs.
-
-You must handle these robustness cases (they are graded, and the eval dataset
-includes them):
-  - **Ambiguous query**: set `clarification_needed=True` and ask for scope
-    rather than guessing.
-  - **No answer in the documents**: set `answer_found=False` and say so, rather
-    than hallucinating.
-  - **Multi-turn**: `history` contains prior turns (oldest first). A follow-up
-    like "what about last year?" should resolve against that context.
-
-Evaluation focus:
-  - Sensible tool-use decisions (reformulation, iteration, knowing when to stop).
-  - Grounded, accurately cited answers.
-  - A useful, transparent reasoning trace (SearchResponse.steps).
-  - Correct behavior on the robustness cases above.
-"""
+"""End-to-end orchestration for agentic document search."""
 from __future__ import annotations
 
-from agents import Agent  # noqa: F401 — available for your implementation
+import asyncio
+from collections.abc import Awaitable, Callable
 
-from app.agents.base import default_model, run_agent  # noqa: F401
-from app.agents.tools import RETRIEVAL_TOOLS  # noqa: F401
-from app.models.schemas import ConversationTurn, SearchMode, SearchResponse
+from agents.exceptions import AgentsException, MaxTurnsExceeded
+from openai import OpenAIError
+from pydantic import ValidationError
+
+from app.agents.research_agent import (
+    ResearchRunResult,
+    run_structured_research,
+)
+from app.agents.research_repair import (
+    ValidatedResearchRunResult,
+    validate_and_repair_research,
+)
+from app.models.schemas import ConversationTurn, SearchResponse
+from app.models.research import AttemptStatus, ResearchBudget
+from app.services.research_response_service import (
+    UnpublishableResearchError,
+    build_validated_search_response,
+)
+from app.services.research_trace_service import build_operational_steps
+
+ResearchCallable = Callable[..., Awaitable[ResearchRunResult]]
+ValidationCallable = Callable[
+    [ResearchRunResult],
+    Awaitable[ValidatedResearchRunResult],
+]
+
+
+class AgenticSearchRuntimeError(RuntimeError):
+    """A safe, typed failure at the agentic-search application boundary."""
+
+    def __init__(self, code: str, public_message: str, status_code: int) -> None:
+        super().__init__(public_message)
+        self.code = code
+        self.public_message = public_message
+        self.status_code = status_code
+
+
+async def execute_agentic_search(
+    query: str,
+    top_k: int,
+    doc_ids: list[str] | None,
+    history: list[ConversationTurn] | None = None,
+    *,
+    research: ResearchCallable = run_structured_research,
+    validate_and_repair: ValidationCallable = validate_and_repair_research,
+    timeout_seconds: float | None = None,
+) -> SearchResponse:
+    """Execute research, correction, validation, and public projection."""
+
+    timeout = timeout_seconds or ResearchBudget().timeout_seconds
+    try:
+        async with asyncio.timeout(timeout):
+            research_result = await research(
+                query,
+                top_k=top_k,
+                doc_ids=doc_ids,
+                history=history,
+            )
+            validated_result = await validate_and_repair(research_result)
+            if not validated_result.validation.valid:
+                failed_tool = any(
+                    item.status is AttemptStatus.FAILED
+                    for item in validated_result.context.attempts
+                )
+                if failed_tool:
+                    raise AgenticSearchRuntimeError(
+                        "retrieval_failed",
+                        "Document retrieval failed. Please try again.",
+                        502,
+                    )
+                raise AgenticSearchRuntimeError(
+                    "invalid_research_output",
+                    "The research result could not be safely validated.",
+                    502,
+                )
+
+            response = build_validated_search_response(
+                query=query,
+                output=validated_result.output,
+                context=validated_result.context,
+            )
+            response.steps = build_operational_steps(
+                validated_result.context,
+                repair_attempted=validated_result.repair_attempted,
+            )
+            return response
+    except TimeoutError as exc:
+        raise AgenticSearchRuntimeError(
+            "research_timeout",
+            "Document research timed out. Please try a narrower question.",
+            504,
+        ) from exc
+    except MaxTurnsExceeded as exc:
+        raise AgenticSearchRuntimeError(
+            "turn_budget_exhausted",
+            "Document research reached its processing limit.",
+            503,
+        ) from exc
+    except (UnpublishableResearchError, ValidationError) as exc:
+        raise AgenticSearchRuntimeError(
+            "invalid_research_output",
+            "The research result could not be safely validated.",
+            502,
+        ) from exc
+    except (AgentsException, OpenAIError) as exc:
+        raise AgenticSearchRuntimeError(
+            "model_provider_failed",
+            "The research model is temporarily unavailable.",
+            502,
+        ) from exc
 
 
 async def run_agentic_search(
@@ -45,22 +122,11 @@ async def run_agentic_search(
     doc_ids: list[str] | None,
     history: list[ConversationTurn] | None = None,
 ) -> SearchResponse:
-    # ------------------------------------------------------------------
-    # TODO(candidate): Implement agentic search.
-    #
-    # Example skeleton to get you started:
-    #
-    #   agent = Agent(
-    #       name="Agentic Search",
-    #       model=default_model(),
-    #       instructions="...your prompt...",
-    #       tools=RETRIEVAL_TOOLS,
-    #   )
-    #   answer, steps, citations = await run_agent(agent, query)
-    #   return SearchResponse(
-    #       query=query, mode=SearchMode.AGENTIC,
-    #       answer=answer, citations=citations, steps=steps,
-    #       clarification_needed=..., answer_found=...,
-    #   )
-    # ------------------------------------------------------------------
-    raise NotImplementedError("Implement run_agentic_search for the agentic mode.")
+    """Run the production agentic-search pipeline."""
+
+    return await execute_agentic_search(
+        query=query,
+        top_k=top_k,
+        doc_ids=doc_ids,
+        history=history,
+    )

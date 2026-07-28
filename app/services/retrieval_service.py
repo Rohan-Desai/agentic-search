@@ -17,6 +17,11 @@ from app.models.research import (
     ResearchContext,
     SearchAttempt,
 )
+from app.services.research_budget_service import (
+    record_search_progress,
+    reserve_tool_call,
+    select_within_evidence_budget,
+)
 from app.services.vector_store import IndexedDocument, SearchHit, StoredChunk, get_vector_store
 
 _MIN_TOP_K = 1
@@ -66,8 +71,24 @@ def execute_evidence_search(
     )
     bounded_top_k = max(_MIN_TOP_K, min(top_k, _MAX_TOP_K))
     started_at = clock()
-    context.usage.tool_calls += 1
-    context.usage.searches += 1
+    budget_error = reserve_tool_call(context, search=True)
+    if budget_error:
+        _record_attempt(
+            context=context,
+            tool_name="search_evidence",
+            query=query,
+            requested_doc_ids=requested_doc_ids,
+            effective_doc_ids=effective_doc_ids,
+            status=AttemptStatus.INVALID,
+            duration_ms=_elapsed_ms(started_at, clock),
+            error_code=budget_error,
+        )
+        return EvidenceSearchResult(
+            status=AttemptStatus.INVALID,
+            query=query,
+            effective_doc_ids=effective_doc_ids,
+            error_code=budget_error,
+        )
 
     if not scope_valid:
         duration_ms = _elapsed_ms(started_at, clock)
@@ -109,6 +130,7 @@ def execute_evidence_search(
         )
         raise RetrievalExecutionError("Evidence retrieval failed.") from exc
 
+    hits, limit_code = select_within_evidence_budget(context, hits)
     candidates = [
         EvidenceCandidate(
             doc_id=hit.doc_id,
@@ -136,7 +158,14 @@ def execute_evidence_search(
         for hit, addition in zip(hits, additions)
     ]
     new_evidence_count = sum(item.is_new for item in additions)
-    status = AttemptStatus.SUCCEEDED if items else AttemptStatus.EMPTY
+    record_search_progress(context, new_evidence_count)
+    status = (
+        AttemptStatus.SUCCEEDED
+        if items
+        else AttemptStatus.INVALID
+        if limit_code
+        else AttemptStatus.EMPTY
+    )
     duration_ms = _elapsed_ms(started_at, clock)
     _record_attempt(
         context=context,
@@ -148,6 +177,7 @@ def execute_evidence_search(
         duration_ms=duration_ms,
         result_evidence_ids=[item.evidence_id for item in items],
         new_evidence_count=new_evidence_count,
+        error_code=limit_code,
     )
     return EvidenceSearchResult(
         status=status,
@@ -155,6 +185,7 @@ def execute_evidence_search(
         effective_doc_ids=effective_doc_ids,
         evidence=items,
         new_evidence_count=new_evidence_count,
+        error_code=limit_code,
     )
 
 
@@ -173,7 +204,23 @@ def execute_context_inspection(
     bounded_before = max(0, min(before, _MAX_CONTEXT_WINDOW))
     bounded_after = max(0, min(after, _MAX_CONTEXT_WINDOW))
     started_at = clock()
-    context.usage.tool_calls += 1
+    budget_error = reserve_tool_call(context)
+    if budget_error:
+        _record_attempt(
+            context=context,
+            tool_name="inspect_evidence_context",
+            query=None,
+            requested_doc_ids=None,
+            effective_doc_ids=None,
+            status=AttemptStatus.INVALID,
+            duration_ms=_elapsed_ms(started_at, clock),
+            error_code=budget_error,
+        )
+        return ContextInspectionResult(
+            status=AttemptStatus.INVALID,
+            source_evidence_id=evidence_id,
+            error_code=budget_error,
+        )
 
     try:
         source = ledger.get(evidence_id)
@@ -253,6 +300,7 @@ def execute_context_inspection(
         raise RetrievalExecutionError("Evidence context retrieval failed.") from exc
 
     discovery_query = f"context:{evidence_id}"
+    chunks, limit_code = select_within_evidence_budget(context, chunks)
     candidates = [
         EvidenceCandidate(
             doc_id=chunk.doc_id,
@@ -278,7 +326,13 @@ def execute_context_inspection(
         for chunk, addition in zip(chunks, additions)
     ]
     new_evidence_count = sum(item.is_new for item in additions)
-    status = AttemptStatus.SUCCEEDED if items else AttemptStatus.EMPTY
+    status = (
+        AttemptStatus.SUCCEEDED
+        if items
+        else AttemptStatus.INVALID
+        if limit_code
+        else AttemptStatus.EMPTY
+    )
     _record_attempt(
         context=context,
         tool_name="inspect_evidence_context",
@@ -289,12 +343,14 @@ def execute_context_inspection(
         duration_ms=_elapsed_ms(started_at, clock),
         result_evidence_ids=[item.evidence_id for item in items],
         new_evidence_count=new_evidence_count,
+        error_code=limit_code,
     )
     return ContextInspectionResult(
         status=status,
         source_evidence_id=evidence_id,
         evidence=items,
         new_evidence_count=new_evidence_count,
+        error_code=limit_code,
     )
 
 

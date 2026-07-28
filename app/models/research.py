@@ -64,6 +64,15 @@ class StopReason(str, Enum):
     ERROR = "error"
 
 
+class ResearchOutcome(str, Enum):
+    """User-facing shape of the research result."""
+
+    COMPLETE = "complete"
+    PARTIAL = "partial"
+    CLARIFICATION = "clarification"
+    NOT_FOUND = "not_found"
+
+
 class ClaimType(str, Enum):
     """How a material claim relates to its supporting evidence."""
 
@@ -215,6 +224,30 @@ class ValidationResult(BaseModel):
     repair_allowed: bool = False
 
 
+class ResearchAgentOutput(BaseModel):
+    """Structured proposal returned by the research agent.
+
+    This is not yet a publishable API response. A later validation layer must
+    verify its references and grounding before the answer reaches a user.
+    """
+
+    resolved_query: str = Field(..., min_length=1)
+    outcome: ResearchOutcome
+    answer: str = Field(..., min_length=1)
+    requirements: list[AnswerRequirement] = Field(default_factory=list)
+    evidence_assessments: list[EvidenceAssessment] = Field(default_factory=list)
+    claims: list[MaterialClaim] = Field(default_factory=list)
+    missing_requirements: list[str] = Field(
+        default_factory=list,
+        description="Requirement IDs that remain unsearched, weak, or not found.",
+    )
+    unresolved_conflicts: list[str] = Field(
+        default_factory=list,
+        description="Requirement IDs whose supporting evidence remains conflicting.",
+    )
+    stop_reason: StopReason
+
+
 class ResearchBudget(BaseModel):
     """Configured upper bounds for one agentic search."""
 
@@ -223,6 +256,7 @@ class ResearchBudget(BaseModel):
     max_searches: int = Field(default=5, ge=1)
     max_evidence: int = Field(default=30, ge=1)
     max_context_chars: int = Field(default=30_000, ge=1)
+    max_repair_attempts: int = Field(default=1, ge=0, le=1)
     timeout_seconds: float = Field(default=60.0, gt=0)
     no_progress_limit: int = Field(default=2, ge=1)
 
@@ -236,6 +270,7 @@ class ResearchUsage(BaseModel):
     evidence_count: int = Field(default=0, ge=0)
     context_chars: int = Field(default=0, ge=0)
     consecutive_no_progress: int = Field(default=0, ge=0)
+    repair_attempts: int = Field(default=0, ge=0)
 
 
 def utc_now() -> datetime:
@@ -252,6 +287,7 @@ class ResearchContext(BaseModel):
     resolved_query: str | None = None
     history: list[ConversationTurn] = Field(default_factory=list)
     authorized_doc_ids: list[str] | None = None
+    retrieval_top_k: int = Field(default=5, ge=1, le=20)
     requirements: list[AnswerRequirement] = Field(default_factory=list)
     evidence: list[EvidenceRecord] = Field(default_factory=list)
     evidence_assessments: list[EvidenceAssessment] = Field(default_factory=list)
