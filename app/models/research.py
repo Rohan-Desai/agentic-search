@@ -64,6 +64,21 @@ class StopReason(str, Enum):
     ERROR = "error"
 
 
+class AgentAnswerOutcome(str, Enum):
+    """The three user-facing outcomes produced by agentic search."""
+
+    ANSWERED = "answered"
+    NOT_FOUND = "not_found"
+    CLARIFICATION = "clarification"
+
+
+class AgentAnswer(BaseModel):
+    """Minimal structured output returned by the agent."""
+
+    answer: str = Field(..., min_length=1)
+    outcome: AgentAnswerOutcome
+
+
 class ClaimType(str, Enum):
     """How a material claim relates to its supporting evidence."""
 
@@ -218,7 +233,7 @@ class ValidationResult(BaseModel):
 class ResearchBudget(BaseModel):
     """Configured upper bounds for one agentic search."""
 
-    max_turns: int = Field(default=8, ge=1)
+    max_turns: int = Field(default=12, ge=1)
     max_tool_calls: int = Field(default=8, ge=1)
     max_searches: int = Field(default=5, ge=1)
     max_evidence: int = Field(default=30, ge=1)
@@ -252,6 +267,7 @@ class ResearchContext(BaseModel):
     resolved_query: str | None = None
     history: list[ConversationTurn] = Field(default_factory=list)
     authorized_doc_ids: list[str] | None = None
+    retrieval_top_k: int = Field(default=5, ge=1, le=50)
     requirements: list[AnswerRequirement] = Field(default_factory=list)
     evidence: list[EvidenceRecord] = Field(default_factory=list)
     evidence_assessments: list[EvidenceAssessment] = Field(default_factory=list)

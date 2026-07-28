@@ -100,7 +100,7 @@ def research_context(
 def test_tool_schema_exposes_only_model_controlled_arguments():
     properties = search_evidence.params_json_schema["properties"]
 
-    assert set(properties) == {"query", "doc_ids", "top_k"}
+    assert set(properties) == {"query", "doc_ids"}
     assert "wrapper" not in properties
     assert "context" not in properties
     assert search_evidence.name == "search_evidence"
