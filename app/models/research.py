@@ -169,6 +169,16 @@ class EvidenceSearchResult(BaseModel):
     error_code: str | None = None
 
 
+class ContextInspectionResult(BaseModel):
+    """Structured result of inspecting context around known evidence."""
+
+    status: AttemptStatus
+    source_evidence_id: str = Field(..., min_length=1)
+    evidence: list[EvidenceSearchItem] = Field(default_factory=list)
+    new_evidence_count: int = Field(default=0, ge=0)
+    error_code: str | None = None
+
+
 class MaterialClaim(BaseModel):
     """A factual statement proposed for the final answer."""
 
@@ -192,6 +202,7 @@ class ResearchBudget(BaseModel):
     """Configured upper bounds for one agentic search."""
 
     max_turns: int = Field(default=8, ge=1)
+    max_tool_calls: int = Field(default=8, ge=1)
     max_searches: int = Field(default=5, ge=1)
     max_evidence: int = Field(default=30, ge=1)
     max_context_chars: int = Field(default=30_000, ge=1)
@@ -203,6 +214,7 @@ class ResearchUsage(BaseModel):
     """Resources consumed so far by one agentic search."""
 
     turns: int = Field(default=0, ge=0)
+    tool_calls: int = Field(default=0, ge=0)
     searches: int = Field(default=0, ge=0)
     evidence_count: int = Field(default=0, ge=0)
     context_chars: int = Field(default=0, ge=0)

@@ -29,6 +29,15 @@ class SearchHit:
     order: int | None = None
 
 
+@dataclass
+class StoredChunk:
+    doc_id: str
+    filename: str
+    chunk_id: str
+    text: str
+    order: int
+
+
 class VectorStore:
     def __init__(self) -> None:
         settings = get_settings()
@@ -92,6 +101,39 @@ class VectorStore:
                 )
             )
         return hits
+
+    def get_context(
+        self,
+        doc_id: str,
+        chunk_order: int,
+        before: int = 1,
+        after: int = 1,
+    ) -> list[StoredChunk]:
+        """Return an ordered, bounded chunk window from one document."""
+
+        result = self._collection.get(
+            where={"doc_id": doc_id},
+            include=["documents", "metadatas"],
+        )
+        ids = result.get("ids") or []
+        docs = result.get("documents") or []
+        metas = result.get("metadatas") or []
+        first_order = max(0, chunk_order - before)
+        last_order = chunk_order + after
+        chunks = []
+        for chunk_id, text, meta in zip(ids, docs, metas):
+            order = int(meta.get("order", -1))
+            if first_order <= order <= last_order:
+                chunks.append(
+                    StoredChunk(
+                        doc_id=str(meta.get("doc_id", "")),
+                        filename=str(meta.get("filename", "")),
+                        chunk_id=str(chunk_id),
+                        text=str(text),
+                        order=order,
+                    )
+                )
+        return sorted(chunks, key=lambda chunk: chunk.order)
 
 
 _store: VectorStore | None = None
