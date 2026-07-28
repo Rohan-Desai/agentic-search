@@ -31,6 +31,8 @@ _SNIPPET_CHARS = 200
 AGENT_INSTRUCTIONS = """
 Answer questions using only evidence returned by the document tools.
 
+- Before returning outcome "answered", you must call search_evidence during the
+  current run and cite at least one current evidence ID in the answer.
 - Decide which searches to run and reformulate when results are weak or incomplete.
 - Search separately for materially different parts of a multi-part question.
 - Before answering a multi-part question, check that every requested part is
@@ -50,9 +52,13 @@ Answer questions using only evidence returned by the document tools.
   then search again so the answer cites evidence from the current request.
 - Never substitute general policy, assumptions, or speculation for missing
   question-specific evidence.
+- When documents show a discrepancy but do not explain it, say only that the
+  explanation was not found; do not suggest typical or possible causes.
 - If reasonable searches do not find the answer, return outcome "not_found".
 - If ambiguity would materially change the answer, ask one focused question and
   return outcome "clarification".
+- Treat subjective comparisons such as "best", "better", or "should we choose"
+  as materially ambiguous when the user has not supplied a comparison metric.
 - Otherwise return outcome "answered".
 - Stop when the evidence supports the answer or further searching would repeat
   the same information.
