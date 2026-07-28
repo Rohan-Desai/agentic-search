@@ -132,7 +132,8 @@ Each accepted passage should retain:
 | Passage text | Exact evidence available to the answer generator |
 | Search query | Explains how it was discovered |
 | Answer requirement | Shows which part of the question it supports |
-| Evidence status | Direct, weak, duplicate, conflicting, or rejected |
+| Evidence quality | Candidate, direct, contextual, weak, or rejected |
+| Requirement relationship | Supports, contradicts, qualifies, or provides context |
 
 Preserve page, sheet, or section metadata during ingestion where possible. Show users the filename, location, and a short supporting snippet.
 

@@ -36,8 +36,9 @@ Create typed internal models for:
 - `ResearchContext`: request identity, query, history, authorized scope, budgets, and timing.
 - `AnswerRequirement`: one material part of the question and its evidence status.
 - `EvidenceRecord`: source identity, location, text, score, query, and evaluation status.
+- `EvidenceAssessment`: how one passage supports, contradicts, qualifies, or contextualizes a requirement.
 - `SearchAttempt`: requested query, scope, results, timing, and progress made.
-- `MaterialClaim`: proposed statement and supporting evidence IDs.
+- `MaterialClaim`: proposed statement with requirement and supporting-evidence IDs.
 - `ValidationResult`: structural and semantic validation findings.
 - `StopReason`: complete, clarification, not found, no progress, budget, timeout, or error.
 

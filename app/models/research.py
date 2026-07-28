@@ -25,15 +25,22 @@ class RequirementStatus(str, Enum):
 
 
 class EvidenceStatus(str, Enum):
-    """The role a retrieved passage plays in the research."""
+    """Intrinsic quality of a retrieved passage."""
 
     CANDIDATE = "candidate"
     DIRECT = "direct"
     CONTEXTUAL = "contextual"
     WEAK = "weak"
-    DUPLICATE = "duplicate"
-    CONFLICTING = "conflicting"
     REJECTED = "rejected"
+
+
+class EvidenceRelationship(str, Enum):
+    """How one evidence record relates to one answer requirement."""
+
+    SUPPORTS = "supports"
+    CONTRADICTS = "contradicts"
+    QUALIFIES = "qualifies"
+    CONTEXT = "context"
 
 
 class AttemptStatus(str, Enum):
@@ -86,7 +93,6 @@ class EvidenceRecord(BaseModel):
     retrieval_score: float | None = None
     location: EvidenceLocation = Field(default_factory=EvidenceLocation)
     status: EvidenceStatus = EvidenceStatus.CANDIDATE
-    requirement_ids: list[str] = Field(default_factory=list)
 
 
 class AnswerRequirement(BaseModel):
@@ -96,6 +102,15 @@ class AnswerRequirement(BaseModel):
     description: str = Field(..., min_length=1)
     status: RequirementStatus = RequirementStatus.UNSEARCHED
     evidence_ids: list[str] = Field(default_factory=list)
+
+
+class EvidenceAssessment(BaseModel):
+    """A semantic relationship between evidence and an answer requirement."""
+
+    evidence_id: str = Field(..., min_length=1)
+    requirement_id: str = Field(..., min_length=1)
+    relationship: EvidenceRelationship
+    rationale: str | None = None
 
 
 class SearchAttempt(BaseModel):
@@ -116,6 +131,7 @@ class MaterialClaim(BaseModel):
 
     claim_id: str = Field(..., min_length=1)
     text: str = Field(..., min_length=1)
+    requirement_ids: list[str] = Field(..., min_length=1)
     evidence_ids: list[str] = Field(..., min_length=1)
     claim_type: ClaimType = ClaimType.DIRECT
 
@@ -166,6 +182,7 @@ class ResearchContext(BaseModel):
     authorized_doc_ids: list[str] | None = None
     requirements: list[AnswerRequirement] = Field(default_factory=list)
     evidence: list[EvidenceRecord] = Field(default_factory=list)
+    evidence_assessments: list[EvidenceAssessment] = Field(default_factory=list)
     attempts: list[SearchAttempt] = Field(default_factory=list)
     claims: list[MaterialClaim] = Field(default_factory=list)
     budget: ResearchBudget = Field(default_factory=ResearchBudget)

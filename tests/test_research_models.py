@@ -6,8 +6,11 @@ from pydantic import ValidationError
 
 from app.models.research import (
     AnswerRequirement,
+    EvidenceAssessment,
     EvidenceLocation,
     EvidenceRecord,
+    EvidenceRelationship,
+    EvidenceStatus,
     MaterialClaim,
     ResearchBudget,
     ResearchContext,
@@ -58,7 +61,6 @@ def test_complete_research_context_can_be_assembled():
         query="2023 revenue",
         retrieval_score=0.91,
         location=EvidenceLocation(sheet="Revenue", chunk_order=2),
-        requirement_ids=["R1"],
     )
     requirement = AnswerRequirement(
         requirement_id="R1",
@@ -69,7 +71,14 @@ def test_complete_research_context_can_be_assembled():
     claim = MaterialClaim(
         claim_id="C1",
         text="2023 revenue was $100 million.",
+        requirement_ids=["R1"],
         evidence_ids=["E1"],
+    )
+    assessment = EvidenceAssessment(
+        evidence_id="E1",
+        requirement_id="R1",
+        relationship=EvidenceRelationship.SUPPORTS,
+        rationale="The passage directly reports the requested value and year.",
     )
     attempt = SearchAttempt(
         tool_name="search_evidence",
@@ -87,6 +96,7 @@ def test_complete_research_context_can_be_assembled():
         authorized_doc_ids=["doc-1"],
         requirements=[requirement],
         evidence=[evidence],
+        evidence_assessments=[assessment],
         attempts=[attempt],
         claims=[claim],
         stop_reason=StopReason.COMPLETE,
@@ -94,5 +104,40 @@ def test_complete_research_context_can_be_assembled():
 
     assert context.requirements[0].evidence_ids == ["E1"]
     assert context.evidence[0].location.sheet == "Revenue"
+    assert context.evidence_assessments[0].relationship is EvidenceRelationship.SUPPORTS
+    assert context.claims[0].requirement_ids == ["R1"]
     assert context.claims[0].evidence_ids == ["E1"]
     assert context.stop_reason is StopReason.COMPLETE
+
+
+def test_evidence_quality_is_separate_from_requirement_relationship():
+    assert set(EvidenceStatus) == {
+        EvidenceStatus.CANDIDATE,
+        EvidenceStatus.DIRECT,
+        EvidenceStatus.CONTEXTUAL,
+        EvidenceStatus.WEAK,
+        EvidenceStatus.REJECTED,
+    }
+    assert EvidenceAssessment(
+        evidence_id="E1",
+        requirement_id="R1",
+        relationship=EvidenceRelationship.CONTRADICTS,
+    ).relationship is EvidenceRelationship.CONTRADICTS
+
+
+def test_material_claim_requires_requirement_and_evidence_links():
+    with pytest.raises(ValidationError):
+        MaterialClaim(
+            claim_id="C1",
+            text="A claim without a requirement is incomplete.",
+            requirement_ids=[],
+            evidence_ids=["E1"],
+        )
+
+    with pytest.raises(ValidationError):
+        MaterialClaim(
+            claim_id="C1",
+            text="A claim without evidence is ungrounded.",
+            requirement_ids=["R1"],
+            evidence_ids=[],
+        )

@@ -253,9 +253,17 @@ classDiagram
         evidence_status
     }
 
+    class EvidenceAssessment {
+        evidence_id
+        requirement_id
+        relationship
+        rationale
+    }
+
     class MaterialClaim {
         claim_id
         text
+        requirement_ids
         evidence_ids
         claim_type
     }
@@ -271,10 +279,13 @@ classDiagram
     ResearchContext "1" *-- "*" AnswerRequirement
     ResearchContext "1" *-- "*" SearchAttempt
     ResearchContext "1" *-- "*" EvidenceRecord
+    ResearchContext "1" *-- "*" EvidenceAssessment
     ResearchContext "1" *-- "*" MaterialClaim
     ResearchContext "1" *-- "0..1" ValidationResult
-    AnswerRequirement "*" --> "*" EvidenceRecord
+    EvidenceAssessment "*" --> "1" AnswerRequirement
+    EvidenceAssessment "*" --> "1" EvidenceRecord
     MaterialClaim "*" --> "*" EvidenceRecord
+    MaterialClaim "*" --> "*" AnswerRequirement
 ```
 
 ## Trust and Authority Boundaries
