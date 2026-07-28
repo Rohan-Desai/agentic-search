@@ -38,6 +38,13 @@ class StoredChunk:
     order: int
 
 
+@dataclass
+class IndexedDocument:
+    doc_id: str
+    filename: str
+    chunk_count: int
+
+
 class VectorStore:
     def __init__(self) -> None:
         settings = get_settings()
@@ -74,6 +81,29 @@ class VectorStore:
     def count(self) -> int:
         """Total number of chunks currently stored."""
         return self._collection.count()
+
+    def list_documents(self, doc_ids: list[str] | None = None) -> list[IndexedDocument]:
+        """Summarize indexed documents from their stored chunk metadata."""
+
+        kwargs = {"include": ["metadatas"]}
+        if doc_ids is not None:
+            kwargs["where"] = {"doc_id": {"$in": doc_ids}}
+        result = self._collection.get(**kwargs)
+        counts: dict[tuple[str, str], int] = {}
+        for meta in result.get("metadatas") or []:
+            key = (
+                str(meta.get("doc_id", "")),
+                str(meta.get("filename", "")),
+            )
+            counts[key] = counts.get(key, 0) + 1
+        return sorted(
+            (
+                IndexedDocument(doc_id=doc_id, filename=filename, chunk_count=count)
+                for (doc_id, filename), count in counts.items()
+                if doc_id and filename
+            ),
+            key=lambda document: (document.filename.lower(), document.doc_id),
+        )
 
     def search(
         self, query: str, top_k: int = 5, doc_ids: list[str] | None = None

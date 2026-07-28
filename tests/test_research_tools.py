@@ -8,17 +8,20 @@ from app.agents.evidence_ledger import EvidenceLedger
 from app.agents.research_tools import (
     AgentToolContext,
     inspect_evidence_context,
+    list_documents,
     run_inspect_evidence_context,
+    run_list_documents,
     run_search_evidence,
     search_evidence,
 )
 from app.models.research import (
     AttemptStatus,
     ContextInspectionResult,
+    DocumentListResult,
     EvidenceSearchResult,
     ResearchContext,
 )
-from app.services.vector_store import SearchHit, StoredChunk
+from app.services.vector_store import IndexedDocument, SearchHit, StoredChunk
 
 
 class FakeStore:
@@ -28,11 +31,15 @@ class FakeStore:
         error: Exception | None = None,
         context_chunks: list[StoredChunk] | None = None,
         context_error: Exception | None = None,
+        documents: list[IndexedDocument] | None = None,
+        catalog_error: Exception | None = None,
     ) -> None:
         self.hits = hits or []
         self.error = error
         self.context_chunks = context_chunks or []
         self.context_error = context_error
+        self.documents = documents or []
+        self.catalog_error = catalog_error
         self.calls: list[dict[str, object]] = []
 
     def search(
@@ -56,6 +63,16 @@ class FakeStore:
         if self.context_error:
             raise self.context_error
         return self.context_chunks
+
+    def list_documents(
+        self,
+        doc_ids: list[str] | None = None,
+    ) -> list[IndexedDocument]:
+        if self.catalog_error:
+            raise self.catalog_error
+        if doc_ids is None:
+            return self.documents
+        return [document for document in self.documents if document.doc_id in doc_ids]
 
 
 def hit(doc_id: str = "doc-1", chunk_id: str = "doc-1::0") -> SearchHit:
@@ -246,4 +263,47 @@ def test_context_tool_returns_safe_failure():
 
     assert result.status is AttemptStatus.FAILED
     assert result.error_code == "context_retrieval_failed"
+    assert "private detail" not in result.model_dump_json()
+
+
+def test_list_documents_tool_has_no_model_controlled_arguments():
+    assert list_documents.params_json_schema["properties"] == {}
+
+
+@pytest.mark.asyncio
+async def test_sdk_list_documents_tool_returns_authorized_catalog():
+    research = research_context(authorized_doc_ids=["doc-2"])
+    tool_context = AgentToolContext.create(
+        research,
+        store=FakeStore(
+            documents=[
+                IndexedDocument("doc-1", "annual-report.pdf", 10),
+                IndexedDocument("doc-2", "operations.docx", 4),
+            ]
+        ),
+    )
+
+    output = await list_documents.on_invoke_tool(
+        RunContextWrapper(context=tool_context),
+        "{}",
+    )
+    result = DocumentListResult.model_validate_json(output)
+
+    assert result.status is AttemptStatus.SUCCEEDED
+    assert [document.doc_id for document in result.documents] == ["doc-2"]
+    assert research.attempts[-1].tool_name == "list_documents"
+    assert research.usage.tool_calls == 1
+
+
+def test_list_documents_tool_returns_safe_failure():
+    research = research_context()
+    tool_context = AgentToolContext.create(
+        research,
+        store=FakeStore(catalog_error=RuntimeError("private detail")),
+    )
+
+    result = run_list_documents(tool_context)
+
+    assert result.status is AttemptStatus.FAILED
+    assert result.error_code == "document_catalog_failed"
     assert "private detail" not in result.model_dump_json()
