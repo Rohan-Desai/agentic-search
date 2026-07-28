@@ -58,7 +58,7 @@ def build_research_input(
     return "\n".join(lines)
 
 
-def _apply_agent_output(
+def apply_agent_output(
     context: ResearchContext,
     output: ResearchAgentOutput,
 ) -> None:
@@ -107,7 +107,7 @@ async def run_structured_research(
         max_turns=context.budget.max_turns,
     )
     output = ResearchAgentOutput.model_validate(result.final_output)
-    _apply_agent_output(context, output)
+    apply_agent_output(context, output)
 
     raw_responses = getattr(result, "raw_responses", ())
     context.usage.turns = len(raw_responses)

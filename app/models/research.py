@@ -256,6 +256,7 @@ class ResearchBudget(BaseModel):
     max_searches: int = Field(default=5, ge=1)
     max_evidence: int = Field(default=30, ge=1)
     max_context_chars: int = Field(default=30_000, ge=1)
+    max_repair_attempts: int = Field(default=1, ge=0, le=1)
     timeout_seconds: float = Field(default=60.0, gt=0)
     no_progress_limit: int = Field(default=2, ge=1)
 
@@ -269,6 +270,7 @@ class ResearchUsage(BaseModel):
     evidence_count: int = Field(default=0, ge=0)
     context_chars: int = Field(default=0, ge=0)
     consecutive_no_progress: int = Field(default=0, ge=0)
+    repair_attempts: int = Field(default=0, ge=0)
 
 
 def utc_now() -> datetime:
