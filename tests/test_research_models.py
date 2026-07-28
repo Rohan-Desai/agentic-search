@@ -7,6 +7,7 @@ from pydantic import ValidationError
 from app.models.research import (
     AnswerRequirement,
     EvidenceAssessment,
+    EvidenceDiscovery,
     EvidenceLocation,
     EvidenceRecord,
     EvidenceRelationship,
@@ -58,9 +59,8 @@ def test_complete_research_context_can_be_assembled():
         filename="financials.xlsx",
         chunk_id="doc-1::2",
         text="2023 revenue was $100 million.",
-        query="2023 revenue",
-        retrieval_score=0.91,
         location=EvidenceLocation(sheet="Revenue", chunk_order=2),
+        discoveries=[EvidenceDiscovery(query="2023 revenue", retrieval_score=0.91)],
     )
     requirement = AnswerRequirement(
         requirement_id="R1",
