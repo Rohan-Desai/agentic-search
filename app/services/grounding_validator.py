@@ -4,6 +4,7 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 
 from app.models.research import (
+    AttemptStatus,
     EvidenceRelationship,
     EvidenceStatus,
     RequirementStatus,
@@ -42,6 +43,19 @@ def validate_research_output(
     errors: list[str] = []
     warnings: list[str] = []
     context_integrity_error = False
+
+    failed_tools = sorted(
+        {
+            item.tool_name
+            for item in context.attempts
+            if item.status is AttemptStatus.FAILED
+        }
+    )
+    if failed_tools:
+        errors.append(
+            f"context has failed tool attempts: {', '.join(failed_tools)}"
+        )
+        context_integrity_error = True
 
     evidence_ids = [item.evidence_id for item in context.evidence]
     evidence_by_id = {item.evidence_id: item for item in context.evidence}
