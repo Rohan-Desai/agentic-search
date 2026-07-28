@@ -147,7 +147,7 @@ def search_evidence(
         wrapper.context,
         query=query,
         doc_ids=doc_ids,
-        top_k=top_k,
+        top_k=min(top_k, wrapper.context.research.retrieval_top_k),
     )
     return result.model_dump_json()
 

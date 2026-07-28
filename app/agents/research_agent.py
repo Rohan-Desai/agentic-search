@@ -76,6 +76,7 @@ async def run_structured_research(
     *,
     history: Sequence[ConversationTurn] | None = None,
     doc_ids: list[str] | None = None,
+    top_k: int = 5,
     budget: ResearchBudget | None = None,
     model: str | None = None,
     store: SearchStore | None = None,
@@ -95,6 +96,7 @@ async def run_structured_research(
         original_query=query,
         history=prior_turns,
         authorized_doc_ids=doc_ids,
+        retrieval_top_k=max(1, min(top_k, 20)),
         budget=budget or ResearchBudget(),
     )
     tool_context = AgentToolContext.create(context, store=store)

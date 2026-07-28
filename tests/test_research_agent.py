@@ -109,6 +109,7 @@ async def test_run_structured_research_is_bounded_and_updates_request_state() ->
     assert result.output is output
     assert result.context.request_id == "request-1"
     assert result.context.authorized_doc_ids == ["doc-1"]
+    assert result.context.retrieval_top_k == 5
     assert result.context.resolved_query == output.resolved_query
     assert result.context.requirements == output.requirements
     assert result.context.claims == output.claims

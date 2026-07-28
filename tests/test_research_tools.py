@@ -147,6 +147,29 @@ async def test_sdk_tool_invocation_returns_structured_json():
     assert result.new_evidence_count == 1
 
 
+@pytest.mark.asyncio
+async def test_sdk_tool_cannot_exceed_request_retrieval_limit():
+    research = research_context()
+    research.retrieval_top_k = 3
+    store = FakeStore([hit()])
+    wrapper = RunContextWrapper(
+        context=AgentToolContext.create(research, store=store)
+    )
+
+    await search_evidence.on_invoke_tool(
+        wrapper,
+        json.dumps(
+            {
+                "query": "Coral Bay capacity",
+                "doc_ids": None,
+                "top_k": 20,
+            }
+        ),
+    )
+
+    assert store.calls[0]["top_k"] == 3
+
+
 def test_tool_contexts_keep_research_runs_isolated():
     first_research = research_context("req-1")
     second_research = research_context("req-2")
