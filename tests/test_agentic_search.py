@@ -138,7 +138,24 @@ async def test_cited_ledger_evidence_becomes_citation(monkeypatch) -> None:
     ]
 
 
-def test_cited_evidence_ids_are_ordered_and_deduplicated() -> None:
+def test_cited_evidence_ids_accept_separate_and_grouped_references() -> None:
     assert agentic_search.cited_evidence_ids(
-        "First [E2], then [E1], then [E2] again."
-    ) == ["E2", "E1"]
+        "First [E2], then [E1, E3], then [E2] again."
+    ) == ["E2", "E1", "E3"]
+
+
+def test_document_list_step_does_not_report_zero_evidence_results() -> None:
+    step = agentic_search.build_steps(
+        agentic_search.ResearchContext(
+            request_id="request-1",
+            original_query="What documents are available?",
+            attempts=[
+                SearchAttempt(
+                    tool_name="list_documents",
+                    status=AttemptStatus.SUCCEEDED,
+                )
+            ],
+        )
+    )
+
+    assert step[0].detail == "status=succeeded"

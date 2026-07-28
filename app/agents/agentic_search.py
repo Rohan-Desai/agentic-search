@@ -24,7 +24,8 @@ from app.models.schemas import (
     SearchResponse,
 )
 
-_EVIDENCE_REFERENCE = re.compile(r"\[(E\d+)\]")
+_EVIDENCE_GROUP = re.compile(r"\[(E\d+(?:\s*,\s*E\d+)*)\]")
+_EVIDENCE_ID = re.compile(r"E\d+")
 _SNIPPET_CHARS = 200
 
 AGENT_INSTRUCTIONS = """
@@ -32,8 +33,12 @@ Answer questions using only evidence returned by the document tools.
 
 - Decide which searches to run and reformulate when results are weak or incomplete.
 - Search separately for materially different parts of a multi-part question.
+- Before answering a multi-part question, check that every requested part is
+  addressed and search again for any missing part.
+- For calculations and table comparisons, search for the underlying datasets
+  and inputs rather than repeatedly searching for the requested calculation.
 - Inspect nearby context when a passage may be missing a qualification.
-- Cite supporting evidence IDs inline as [E1], [E2], and so on.
+- Cite supporting evidence IDs inline as [E1][E2] or [E1, E2].
 - Never invent an evidence ID or use outside knowledge.
 - If reasonable searches do not find the answer, return outcome "not_found".
 - If ambiguity would materially change the answer, ask one focused question and
@@ -74,7 +79,12 @@ def build_agent_input(
 def cited_evidence_ids(answer: str) -> list[str]:
     """Return unique inline evidence references in answer order."""
 
-    return list(dict.fromkeys(_EVIDENCE_REFERENCE.findall(answer)))
+    evidence_ids = [
+        evidence_id
+        for group in _EVIDENCE_GROUP.findall(answer)
+        for evidence_id in _EVIDENCE_ID.findall(group)
+    ]
+    return list(dict.fromkeys(evidence_ids))
 
 
 def build_citations(
@@ -112,6 +122,14 @@ def build_steps(context: ResearchContext) -> list[AgentStep]:
 
 def _step_from_attempt(attempt: SearchAttempt) -> AgentStep:
     details = [f"status={attempt.status.value}"]
+    if attempt.tool_name == "list_documents":
+        if attempt.error_code:
+            details.append(f"error={attempt.error_code}")
+        return AgentStep(
+            kind="tool",
+            name=attempt.tool_name,
+            detail="; ".join(details),
+        )
     if attempt.query:
         details.append(f"query={attempt.query}")
     details.append(f"results={len(attempt.result_evidence_ids)}")
