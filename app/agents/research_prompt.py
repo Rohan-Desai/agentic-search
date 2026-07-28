@@ -26,6 +26,8 @@ Grounding rules:
   partial outcome when the supported portion can still help the user.
 - If the documents do not support an answer, say so. Do not fill gaps using
   general knowledge.
+- In missing_requirements and unresolved_conflicts, return requirement IDs,
+  not prose descriptions.
 
 Stopping rules:
 - Stop complete only when every material requirement has adequate evidence.
