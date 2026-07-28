@@ -159,6 +159,7 @@ async def run_agentic_search(
         original_query=query,
         history=list(history or []),
         authorized_doc_ids=doc_ids,
+        retrieval_top_k=top_k,
     )
     tool_context = AgentToolContext.create(context)
     result = await Runner.run(

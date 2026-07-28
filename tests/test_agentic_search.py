@@ -46,7 +46,8 @@ async def test_agent_runs_with_tools_history_scope_and_turn_limit(monkeypatch) -
     assert "Compare Redhawk and Coral Bay." in captured["prompt"]
     assert "Which one has the higher price?" in captured["prompt"]
     assert captured["kwargs"]["context"].research.authorized_doc_ids == ["doc-1"]
-    assert captured["kwargs"]["max_turns"] == 8
+    assert captured["kwargs"]["context"].research.retrieval_top_k == 5
+    assert captured["kwargs"]["max_turns"] == 12
     assert response.mode is SearchMode.AGENTIC
     assert response.answer_found is True
     assert response.clarification_needed is False

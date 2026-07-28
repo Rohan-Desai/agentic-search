@@ -128,7 +128,6 @@ def search_evidence(
     wrapper: RunContextWrapper[AgentToolContext],
     query: str,
     doc_ids: list[str] | None = None,
-    top_k: int = 5,
 ) -> str:
     """Find candidate evidence in the authorized document collection.
 
@@ -140,14 +139,13 @@ def search_evidence(
     Args:
         query: Focused natural-language search query.
         doc_ids: Optional document IDs to narrow the authorized search scope.
-        top_k: Requested number of passages; the application enforces safe limits.
     """
 
     result = run_search_evidence(
         wrapper.context,
         query=query,
         doc_ids=doc_ids,
-        top_k=top_k,
+        top_k=wrapper.context.research.retrieval_top_k,
     )
     return result.model_dump_json()
 
