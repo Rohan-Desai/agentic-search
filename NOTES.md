@@ -33,11 +33,11 @@ bookkeeping without proving factual correctness, so I chose the smaller design.
 
 Initial manual evaluation also showed that semantic retrieval could miss exact
 filenames, spreadsheet rows, numbers, and rare incident terminology. I added
-BM25 keyword ranking over filename plus chunk text and combine it with Chroma's
+BM25 keyword ranking over filename plus chunk text and combined it with Chroma's
 semantic ranking using Reciprocal Rank Fusion. The model still sees one search
 tool; retrieval quality improves without adding another tool-selection decision.
 
-## Agent behavior
+## Required behaviors
 
 The prompt asks the agent to:
 
@@ -55,6 +55,11 @@ The prompt asks the agent to:
 Conversation history is included to resolve follow-ups such as “What about
 Coral Bay?” Evidence IDs are request-scoped, so old citation markers are removed
 from history and factual follow-ups retrieve fresh evidence.
+
+If sources disagree, the agent is instructed to report the discrepancy and
+avoid guessing which source is correct. If the documents do not contain an
+answer, it returns `not_found`; if ambiguity would materially change the answer,
+it returns `clarification` with one focused question.
 
 ## Grounding and citations
 
@@ -75,7 +80,18 @@ deterministically prove that the cited text entails every sentence.
 - Context inspection is limited to nearby chunks in the same source.
 - Document text is presented as evidence, not executable instructions.
 
-## Tradeoffs and remaining limitations
+## Scaffold changes and tradeoffs
+
+I retained the provided FastAPI API, ingestion pipeline, Chroma store, response
+contract, and React UI. The main additions are the agentic-search
+implementation, request-scoped retrieval and evidence services, and tests. I
+also changed the shared `VectorStore.search()` implementation from semantic-only
+retrieval to hybrid semantic and BM25 retrieval. This benefits normal and
+agentic modes while preserving the provided `add()`/`search()` interface.
+
+I chose one agent rather than planner, researcher, and validator agents. For
+this corpus, a single SDK tool loop is easier to understand and test while
+still allowing genuine model-directed reformulation and repeated search.
 
 The current BM25 implementation loads scoped chunk text from Chroma for each
 search. That is simple and appropriate for this small corpus, but a large
@@ -93,29 +109,34 @@ this implementation.
 
 ## Running
 
-The standard README instructions are unchanged:
+The standard README instructions are unchanged. In the backend terminal:
 
 ```bash
 make seed
-make dev
+make run
 ```
 
-Run the frontend in a second terminal:
+In a second terminal:
 
 ```bash
-cd frontend
-npm install
-npm run dev
+make install-frontend
+make frontend
 ```
 
-Select **Agentic** mode in the chat UI.
+Open `http://localhost:5173` and select **Agentic** mode.
 
-## Example questions
+## Reproducible examples
 
-- “Who has executive accountability for safety?”
-- “Was Coral Bay Solar an 82 MW or 90 MW project in 2023?”
-- “Why was Cordillera EPC recommended for Cascade Ridge even though it was not
-  the lowest bidder?”
-- “What brand of coffee is served in Meridian’s Boulder office?”
-- Ask “Summarize Redhawk Solar’s PPA terms,” then follow with “What about Coral
-  Bay?”
+These were tested against the included seed corpus:
+
+| Question | Expected source documents |
+|---|---|
+| “What caused Meridian’s 2023 lost-time incident, and what corrective actions were taken?” | `Incident_Report_Sagebrush_Aug2023.docx` |
+| “Compare Sagebrush Wind’s 2023 electricity generation with its reported RECs generated.” | `Monthly_Generation_2023.xlsx`, `REC_Inventory_2023.xlsx` |
+| “Which operating project had the lowest 2023 O&M cost per MWh? Show all four calculations.” | `OM_Cost_Tracker_2023.xlsx`, `Monthly_Generation_2023.xlsx` |
+| “Does Saltflat Solar’s reported G4 stage agree with Meridian’s formal stage-gate procedure and current permitting status?” | `Development_Budget_Pipeline.xlsx`, `Project_Development_Procedure.docx`, `Permitting_Status_Q4_2023.docx` |
+| “What brand of coffee is served in Meridian’s Boulder office?” | No supporting document; expected behavior is `not_found` |
+
+For a follow-up test, ask “Summarize Redhawk Solar’s PPA terms,” then “What
+about Coral Bay?”, then “Which has the higher energy price?” The relevant
+sources are `PPA_Summary_Redhawk_Solar.pdf` and `PPA_Pricing_Schedule.xlsx`.
