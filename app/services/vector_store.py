@@ -7,8 +7,8 @@ so the agent tools keep working.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
 from collections import defaultdict
+from dataclasses import dataclass
 import re
 
 import chromadb

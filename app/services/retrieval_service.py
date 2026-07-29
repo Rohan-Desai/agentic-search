@@ -66,8 +66,6 @@ def execute_evidence_search(
     )
     bounded_top_k = max(_MIN_TOP_K, min(top_k, _MAX_TOP_K))
     started_at = clock()
-    context.usage.tool_calls += 1
-    context.usage.searches += 1
 
     if not scope_valid:
         duration_ms = _elapsed_ms(started_at, clock)
@@ -173,7 +171,6 @@ def execute_context_inspection(
     bounded_before = max(0, min(before, _MAX_CONTEXT_WINDOW))
     bounded_after = max(0, min(after, _MAX_CONTEXT_WINDOW))
     started_at = clock()
-    context.usage.tool_calls += 1
 
     try:
         source = ledger.get(evidence_id)

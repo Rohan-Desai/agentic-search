@@ -242,8 +242,8 @@ Chat:    UI → POST /search {query, mode, history}
 `app/agents/tools.py` has ready-to-use function tools (decorated with the SDK's
 `@function_tool`); pass `RETRIEVAL_TOOLS` to an agent's `tools=`:
 
-- `search_documents(query, top_k)` — semantic search across everything.
-- `search_within_documents(query, doc_ids, top_k)` — scoped search.
+- `search_documents(query, top_k)` — hybrid search across everything.
+- `search_within_documents(query, doc_ids, top_k)` — scoped hybrid search.
 
 `app/agents/base.py`'s `run_agent(agent, query)` runs an agent to completion and
 extracts a basic tool-call trace you can surface in the UI. Add tools and

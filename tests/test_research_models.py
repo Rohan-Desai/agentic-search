@@ -1,4 +1,4 @@
-"""Deterministic tests for the internal agentic-research state."""
+"""Tests for the internal agentic-search state models."""
 from datetime import timezone
 
 import pytest
@@ -7,19 +7,11 @@ from pydantic import ValidationError
 from app.models.research import (
     AgentAnswer,
     AgentAnswerOutcome,
-    AnswerRequirement,
-    EvidenceAssessment,
     EvidenceDiscovery,
     EvidenceLocation,
     EvidenceRecord,
-    EvidenceRelationship,
-    EvidenceStatus,
-    MaterialClaim,
-    ResearchBudget,
     ResearchContext,
-    RequirementStatus,
     SearchAttempt,
-    StopReason,
 )
 from app.models.schemas import ConversationTurn
 
@@ -36,63 +28,48 @@ def test_agent_answer_has_only_answer_and_outcome() -> None:
     }
 
 
-def test_research_context_defaults_are_isolated():
+def test_research_context_defaults_are_isolated() -> None:
     first = ResearchContext(request_id="req-1", original_query="Question one")
     second = ResearchContext(request_id="req-2", original_query="Question two")
 
-    first.requirements.append(
-        AnswerRequirement(requirement_id="r1", description="Find the reported revenue")
+    first.evidence.append(
+        EvidenceRecord(
+            evidence_id="E1",
+            doc_id="doc-1",
+            filename="source.pdf",
+            chunk_id="doc-1::0",
+            text="Evidence.",
+            discoveries=[EvidenceDiscovery(query="question one")],
+        )
     )
-    first.usage.searches += 1
 
-    assert second.requirements == []
-    assert second.usage.searches == 0
+    assert second.evidence == []
     assert first.started_at.tzinfo == timezone.utc
 
 
-def test_research_budget_rejects_non_positive_limits():
+def test_research_context_rejects_non_positive_turn_limit() -> None:
     with pytest.raises(ValidationError):
-        ResearchBudget(max_searches=0)
+        ResearchContext(
+            request_id="req-1",
+            original_query="Question",
+            max_turns=0,
+        )
 
-    with pytest.raises(ValidationError):
-        ResearchBudget(timeout_seconds=0)
 
-
-def test_evidence_location_rejects_invalid_page_and_order():
-    with pytest.raises(ValidationError):
-        EvidenceLocation(page=0)
-
+def test_evidence_location_rejects_invalid_order() -> None:
     with pytest.raises(ValidationError):
         EvidenceLocation(chunk_order=-1)
 
 
-def test_complete_research_context_can_be_assembled():
+def test_runtime_research_context_can_be_assembled() -> None:
     evidence = EvidenceRecord(
         evidence_id="E1",
         doc_id="doc-1",
         filename="financials.xlsx",
         chunk_id="doc-1::2",
         text="2023 revenue was $100 million.",
-        location=EvidenceLocation(sheet="Revenue", chunk_order=2),
+        location=EvidenceLocation(chunk_order=2),
         discoveries=[EvidenceDiscovery(query="2023 revenue", retrieval_score=0.91)],
-    )
-    requirement = AnswerRequirement(
-        requirement_id="R1",
-        description="Find 2023 revenue",
-        status=RequirementStatus.SUPPORTED,
-        evidence_ids=["E1"],
-    )
-    claim = MaterialClaim(
-        claim_id="C1",
-        text="2023 revenue was $100 million.",
-        requirement_ids=["R1"],
-        evidence_ids=["E1"],
-    )
-    assessment = EvidenceAssessment(
-        evidence_id="E1",
-        requirement_id="R1",
-        relationship=EvidenceRelationship.SUPPORTS,
-        rationale="The passage directly reports the requested value and year.",
     )
     attempt = SearchAttempt(
         tool_name="search_evidence",
@@ -105,53 +82,11 @@ def test_complete_research_context_can_be_assembled():
     context = ResearchContext(
         request_id="req-1",
         original_query="What was revenue in 2023?",
-        resolved_query="What was Meridian's total revenue in 2023?",
         history=[ConversationTurn(role="user", content="Tell me about Meridian.")],
         authorized_doc_ids=["doc-1"],
-        requirements=[requirement],
         evidence=[evidence],
-        evidence_assessments=[assessment],
         attempts=[attempt],
-        claims=[claim],
-        stop_reason=StopReason.COMPLETE,
     )
 
-    assert context.requirements[0].evidence_ids == ["E1"]
-    assert context.evidence[0].location.sheet == "Revenue"
-    assert context.evidence_assessments[0].relationship is EvidenceRelationship.SUPPORTS
-    assert context.claims[0].requirement_ids == ["R1"]
-    assert context.claims[0].evidence_ids == ["E1"]
-    assert context.stop_reason is StopReason.COMPLETE
-
-
-def test_evidence_quality_is_separate_from_requirement_relationship():
-    assert set(EvidenceStatus) == {
-        EvidenceStatus.CANDIDATE,
-        EvidenceStatus.DIRECT,
-        EvidenceStatus.CONTEXTUAL,
-        EvidenceStatus.WEAK,
-        EvidenceStatus.REJECTED,
-    }
-    assert EvidenceAssessment(
-        evidence_id="E1",
-        requirement_id="R1",
-        relationship=EvidenceRelationship.CONTRADICTS,
-    ).relationship is EvidenceRelationship.CONTRADICTS
-
-
-def test_material_claim_requires_requirement_and_evidence_links():
-    with pytest.raises(ValidationError):
-        MaterialClaim(
-            claim_id="C1",
-            text="A claim without a requirement is incomplete.",
-            requirement_ids=[],
-            evidence_ids=["E1"],
-        )
-
-    with pytest.raises(ValidationError):
-        MaterialClaim(
-            claim_id="C1",
-            text="A claim without evidence is ungrounded.",
-            requirement_ids=["R1"],
-            evidence_ids=[],
-        )
+    assert context.evidence[0].location.chunk_order == 2
+    assert context.attempts[0].result_evidence_ids == ["E1"]

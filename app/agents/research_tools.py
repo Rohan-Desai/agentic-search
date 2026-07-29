@@ -132,7 +132,7 @@ def search_evidence(
     """Find candidate evidence in the authorized document collection.
 
     Use this for an initial document search or a targeted follow-up. Results
-    include stable evidence IDs, source passages, similarity scores, and
+    include stable evidence IDs, source passages, hybrid rank scores, and
     whether each passage is new to this research run. Treat results as
     candidate evidence that still needs to be evaluated.
 
