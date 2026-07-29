@@ -1,121 +1,180 @@
 # Implementation Notes
 
-## Approach
+## 1. Design goals and decisions
 
-I implemented agentic search as one OpenAI Agents SDK agent with three
-request-scoped document tools:
+I aimed to build a practical document-search agent rather than a production
+research platform. The important goals were genuine model-directed retrieval,
+grounded answers, sensible uncertainty handling, and an implementation I could
+clearly explain and test.
 
-- `search_evidence` performs hybrid semantic and BM25 retrieval across all
-  authorized documents or a model-selected subset.
-- `inspect_evidence_context` retrieves bounded neighboring chunks when an
-  isolated result needs context.
-- `list_documents` exposes the searchable document catalog without treating the
-  catalog itself as evidence.
+### Agent control
 
-The Agents SDK provides the decision loop. After each tool result, the model
-chooses whether to reformulate, narrow to a document, inspect context, search
-again, or answer. Application code does not prescribe a fixed sequence.
+The agent must decide how to search, whether to reformulate, when evidence is
+sufficient, and when to stop.
 
-Each request owns a `ResearchContext` and `EvidenceLedger`. Successful retrieval
-results receive stable IDs such as `E1` and are deduplicated by document and
-chunk. The final answer cites those IDs inline. The application verifies that
-each cited ID exists in the current ledger and projects it into the existing
-`SearchResponse.citations` contract.
+| Approach considered | Benefit | Cost |
+|---|---|---|
+| Hard-coded search workflow | Predictable and easy to test | Not genuinely agentic |
+| Multiple planner/researcher/validator agents | Specialized responsibilities | More cost, state, and failure modes |
+| One tool-using agent | Simple, but still model-directed | Less deterministic |
 
-The agent's structured output is deliberately small:
+I chose one OpenAI Agents SDK agent. The SDK owns the tool loop, while the
+instructions define expectations for multi-part searches, reformulation,
+completeness, ambiguity, and stopping. The application enforces boundaries but
+does not prescribe a fixed research sequence.
 
-- `answer`
-- `outcome`: `answered`, `not_found`, or `clarification`
+### Grounding
 
-I initially considered explicit requirement graphs and a separate validation
-and repair pipeline. Behavioral testing showed that this duplicated model
-bookkeeping without proving factual correctness, so I chose the smaller design.
+| Approach considered | Benefit | Limitation |
+|---|---|---|
+| Put retrieved text directly in one prompt | Minimal implementation | Weak provenance and no iterative retrieval |
+| Request-scoped evidence IDs | Traceable, deduplicated citations | Does not prove semantic entailment |
+| Separate validator agent | Another check on the answer | Still probabilistic; adds complexity |
+| Quote-backed claims | Stronger passage provenance | Does not prove correct interpretation |
 
-Initial manual evaluation also showed that semantic retrieval could miss exact
-filenames, spreadsheet rows, numbers, and rare incident terminology. I added
-BM25 keyword ranking over filename plus chunk text and combine it with Chroma's
-semantic ranking using Reciprocal Rank Fusion. The model still sees one search
-tool; retrieval quality improves without adding another tool-selection decision.
+I chose a request-scoped `EvidenceLedger`. Every retrieved chunk receives an ID
+such as `E1`; final citations must resolve to evidence collected during that
+request. This proves that a cited passage exists and was retrieved, but not that
+every model interpretation is logically correct. I document that limitation
+rather than presenting retrieval score as factual confidence.
 
-## Agent behavior
+### Tools
 
-The prompt asks the agent to:
+Too few tools restrict the agent, while too many create unnecessary decisions.
+I exposed three focused actions:
 
-- search before returning a factual answer;
-- break multi-part questions into separate searches when useful;
-- reformulate weak or repetitive searches;
-- use document discovery and scoped retrieval when broad search stalls;
-- retrieve source inputs for calculations and comparisons;
-- ask a focused clarification question when interpretation materially changes
-  the answer;
-- say exactly what was not found instead of filling gaps with outside knowledge;
-- expose unresolved document discrepancies without inventing an explanation;
-- stop when evidence is sufficient or further retrieval would repeat results.
+| Tool | Purpose |
+|---|---|
+| `search_evidence` | Search all authorized documents or a model-selected subset |
+| `list_documents` | Discover available filenames and document IDs |
+| `inspect_evidence_context` | Read nearby chunks when a result needs qualification |
 
-Conversation history is included to resolve follow-ups such as “What about
-Coral Bay?” Evidence IDs are request-scoped, so old citation markers are removed
-from history and factual follow-ups retrieve fresh evidence.
+The model supplies only tool arguments such as a query or document IDs. Private
+request state, document authorization, storage access, and ledger updates remain
+in application code.
 
-## Grounding and citations
+### Retrieval
 
-Only passages returned by the request-scoped tools enter the evidence ledger.
-Inline forms such as `[E1][E2]` and `[E1, E2]` are supported. Citations preserve
-the filename, document ID, chunk ID, snippet, and best retrieval score.
+Semantic search handles paraphrases but sometimes missed filenames, numbers,
+spreadsheet rows, and rare incident terminology during manual QA.
 
-Retrieval score is a normalized hybrid rank signal, not confidence that a claim
-is true. The implementation guarantees that a citation came from an authorized
-document retrieved during the current request. It does not claim to
-deterministically prove that the cited text entails every sentence.
+| Strategy | Strength | Weakness |
+|---|---|---|
+| Semantic retrieval | Meaning and paraphrases | Exact terms can be missed |
+| BM25 keyword retrieval | Names, numbers, rare terms | Weak on paraphrases |
+| Hybrid retrieval | Combines both signals | More retrieval work |
 
-## Scope and controls
+I combine Chroma semantic rankings with BM25 rankings over filename and chunk
+text using Reciprocal Rank Fusion. This changed the shared
+`VectorStore.search()` implementation, so normal and agentic modes both benefit
+without changing its public interface.
 
-- The user-selected document scope cannot be widened by the model.
-- The API request controls retrieval `top_k`.
-- The SDK run is capped at 12 turns.
-- Context inspection is limited to nearby chunks in the same source.
-- Document text is presented as evidence, not executable instructions.
+I initially modeled requirement graphs, claims, assessments, validation state,
+and detailed budgets. Those structures did not drive the final runtime and did
+not guarantee correctness, so I removed them. The smaller design better matches
+the assignment and is easier to reason about.
 
-## Tradeoffs and remaining limitations
+## 2. Final implementation
 
-The current BM25 implementation loads scoped chunk text from Chroma for each
-search. That is simple and appropriate for this small corpus, but a large
-production collection would need a persistent lexical index or a store with
-native hybrid retrieval. The agent can also narrow to an unhelpful document
-subset, so improved retrieval does not remove model-level tool judgment.
+```text
+POST /search
+     |
+     v
+Search service --> One Agents SDK agent
+                         |
+          +--------------+--------------+
+          |              |              |
+   list_documents  search_evidence  inspect_context
+                         |
+                  Hybrid retrieval
+                 /                \
+          Chroma semantic        BM25
+                 \                /
+              Reciprocal Rank Fusion
+                         |
+                  Evidence ledger
+                         |
+                 Answer + citations
+```
 
-Model-generated arithmetic and interpretation can still be imperfect. A
-table-aware query tool or calculator would improve numerical reliability, but
-I left these out to keep the submission focused.
+For each request:
 
-The operational trace shows observable tool activity rather than private model
-reasoning. Provider and vector-store telemetry warnings are not customized in
-this implementation.
+1. The API receives the query, mode, document scope, `top_k`, and history.
+2. `run_agentic_search()` creates a `ResearchContext` and an
+   `AgentToolContext` containing its ledger.
+3. The SDK runner lets the model call tools or finish.
+4. Tool code enforces scope, retrieves passages, registers them as `E1`, `E2`,
+   and so on, and returns those passages to the model.
+5. The model can reformulate, narrow, inspect context, or search again.
+6. The final structured output is `answer` plus `outcome`: `answered`,
+   `not_found`, or `clarification`.
+7. Application code resolves cited evidence IDs into the existing public
+   `Citation` objects and exposes tool attempts as UI steps.
 
-## Running
+The prompt requires a current-request search before a factual answer. It asks
+the model to search separately for missing parts, retrieve source inputs for
+calculations, ask one focused question when ambiguity materially changes the
+answer, and state exactly what was not found. When documents conflict, it
+reports the discrepancy without guessing which source is correct. Historical
+citation markers are removed from follow-up context because evidence IDs are
+request-scoped; factual follow-ups search again for fresh evidence.
 
-The standard README instructions are unchanged:
+| The application guarantees | It does not guarantee |
+|---|---|
+| Cited evidence exists and was retrieved | Every interpretation is correct |
+| The agent cannot widen document scope | A citation entails every sentence |
+| Repeated chunks reuse one evidence ID | No conflicting passage exists elsewhere |
+| The run stops after at most 12 SDK turns | Model-generated arithmetic is perfect |
+
+I retained the supplied FastAPI API, ingestion pipeline, Chroma store, response
+contract, and React UI. I added the agentic loop, request-scoped tools,
+retrieval service, evidence ledger, hybrid ranking, and focused tests.
+
+### Running
+
+Backend:
 
 ```bash
+pip install -r requirements.txt
 make seed
-make dev
+make run
 ```
 
-Run the frontend in a second terminal:
+Second terminal:
 
 ```bash
-cd frontend
-npm install
-npm run dev
+make install-frontend
+make frontend
 ```
 
-Select **Agentic** mode in the chat UI.
+Open `http://localhost:5173` and select **Agentic** mode.
 
-## Example questions
+## 3. Limitations, future work, and examples
 
-- “Who has executive accountability for safety?”
-- “Was Coral Bay Solar an 82 MW or 90 MW project in 2023?”
-- “Why was Cordillera EPC recommended for Cascade Ridge even though it was not
-  the lowest bidder?”
-- “What brand of coffee is served in Meridian’s Boulder office?”
-- Ask “Summarize Redhawk Solar’s PPA terms,” then follow with “What about Coral
-  Bay?”
+The current agent remains probabilistic. BM25 loads scoped chunks from Chroma
+for each search, citations prove provenance rather than semantic entailment,
+spreadsheets are retrieved as text, and arithmetic is model-generated.
+
+With more time, I would first build a repeatable evaluation set measuring
+document recall, answer correctness, citation support, latency, and tool calls.
+I would then use those measurements to prioritize:
+
+1. persistent lexical search and candidate reranking;
+2. table-aware spreadsheet retrieval with row and cell provenance;
+3. a calculator for derived answers;
+4. claim-to-evidence validation, optionally including verified quotations; and
+5. measured caching and tighter time/tool budgets.
+
+### Reproducible examples
+
+| Question | Expected source documents |
+|---|---|
+| What caused Meridian’s 2023 lost-time incident, and what corrective actions were taken? | `Incident_Report_Sagebrush_Aug2023.docx` |
+| Compare Sagebrush Wind’s 2023 generation with its reported RECs. | `Monthly_Generation_2023.xlsx`, `REC_Inventory_2023.xlsx` |
+| Which operating project had the lowest 2023 O&M cost per MWh? Show all four calculations. | `OM_Cost_Tracker_2023.xlsx`, `Monthly_Generation_2023.xlsx` |
+| Does Saltflat Solar’s G4 stage agree with the procedure and permitting status? | `Development_Budget_Pipeline.xlsx`, `Project_Development_Procedure.docx`, `Permitting_Status_Q4_2023.docx` |
+| What brand of coffee is served in Meridian’s Boulder office? | No supporting document; expected outcome is `not_found` |
+
+For a follow-up test, ask “Summarize Redhawk Solar’s PPA terms,” then “What
+about Coral Bay?”, then “Which has the higher energy price?” Expected sources
+are `PPA_Summary_Redhawk_Solar.pdf` and `PPA_Pricing_Schedule.xlsx`.
