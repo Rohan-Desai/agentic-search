@@ -8,15 +8,20 @@ so the agent tools keep working.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections import defaultdict
+import re
 
 import chromadb
 from chromadb.config import Settings as ChromaSettings
+from rank_bm25 import BM25Okapi
 
 from app.core.config import get_settings
 from app.ingestion.chunker import Chunk
 from app.services.embeddings import embed_query, embed_texts
 
 _COLLECTION = "documents"
+_TOKEN_PATTERN = re.compile(r"[a-z0-9]+")
+_RRF_K = 60
 
 
 @dataclass
@@ -43,6 +48,67 @@ class IndexedDocument:
     doc_id: str
     filename: str
     chunk_count: int
+
+
+def _tokenize(value: str) -> list[str]:
+    """Return lowercase alphanumeric terms for lexical ranking."""
+
+    return _TOKEN_PATTERN.findall(value.lower())
+
+
+def _keyword_ranking(query: str, chunks: list[StoredChunk]) -> list[str]:
+    """Rank chunks containing query terms with BM25."""
+
+    query_tokens = _tokenize(query)
+    if not query_tokens or not chunks:
+        return []
+
+    corpus = [
+        _tokenize(f"{chunk.filename} {chunk.text}")
+        for chunk in chunks
+    ]
+    query_terms = set(query_tokens)
+    matching_indexes = [
+        index
+        for index, tokens in enumerate(corpus)
+        if query_terms.intersection(tokens)
+    ]
+    if not matching_indexes:
+        return []
+
+    scores = BM25Okapi(corpus).get_scores(query_tokens)
+    ranked_indexes = sorted(
+        matching_indexes,
+        key=lambda index: (-float(scores[index]), index),
+    )
+    return [chunks[index].chunk_id for index in ranked_indexes]
+
+
+def _reciprocal_rank_fusion(
+    rankings: list[list[str]],
+    *,
+    rank_constant: int = _RRF_K,
+) -> dict[str, float]:
+    """Fuse ranked chunk IDs and normalize scores to a zero-to-one range."""
+
+    active_rankings = [ranking for ranking in rankings if ranking]
+    if not active_rankings:
+        return {}
+
+    scores: defaultdict[str, float] = defaultdict(float)
+    for ranking in active_rankings:
+        seen: set[str] = set()
+        for rank, chunk_id in enumerate(ranking, start=1):
+            if chunk_id in seen:
+                continue
+            seen.add(chunk_id)
+            scores[chunk_id] += 1.0 / (rank_constant + rank)
+
+    maximum = len(active_rankings) / (rank_constant + 1)
+    return {
+        chunk_id: score / maximum
+        for chunk_id, score in scores.items()
+    }
 
 
 class VectorStore:
