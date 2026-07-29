@@ -13,7 +13,11 @@ flowchart LR
     LIST --> CATALOG[Document catalog]
     SEARCH --> RETRIEVAL[Retrieval service]
     INSPECT --> RETRIEVAL
-    RETRIEVAL --> VECTOR[(Chroma)]
+    RETRIEVAL --> HYBRID[Hybrid retrieval]
+    HYBRID --> SEMANTIC[Chroma semantic rank]
+    HYBRID --> KEYWORD[BM25 keyword rank]
+    SEMANTIC --> FUSION[Reciprocal Rank Fusion]
+    KEYWORD --> FUSION
     RETRIEVAL --> LEDGER[Request evidence ledger]
     LEDGER --> RESPONSE[Answer citations]
     AGENT --> RESPONSE
@@ -26,10 +30,12 @@ flowchart LR
    authorized document IDs, and retrieval settings.
 2. One agent receives the three document tools.
 3. The Agents SDK lets the model call tools repeatedly or return its answer.
-4. Successful retrievals are registered in an `EvidenceLedger` as `E1`, `E2`,
+4. Each evidence search combines semantic and BM25 rankings with Reciprocal
+   Rank Fusion, then returns the requested top results.
+5. Successful retrievals are registered in an `EvidenceLedger` as `E1`, `E2`,
    and so on.
-5. The agent cites current-request evidence inline, for example `[E1, E2]`.
-6. Application code resolves those IDs into the existing public `Citation`
+6. The agent cites current-request evidence inline, for example `[E1, E2]`.
+7. Application code resolves those IDs into the existing public `Citation`
    objects and converts recorded attempts into concise UI steps.
 
 ## Responsibility boundary
