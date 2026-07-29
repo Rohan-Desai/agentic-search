@@ -102,7 +102,7 @@ def test_search_registers_structured_evidence_and_attempt():
     assert context.attempts[0].result_evidence_ids == ["E1"]
     assert context.attempts[0].effective_doc_ids is None
     assert context.attempts[0].duration_ms == 25
-    assert context.usage.searches == 1
+    assert len(context.attempts) == 1
 
 
 def test_repeated_search_records_zero_new_evidence():
@@ -127,7 +127,7 @@ def test_repeated_search_records_zero_new_evidence():
     assert second.new_evidence_count == 0
     assert second.evidence[0].evidence_id == "E1"
     assert len(context.evidence[0].discoveries) == 2
-    assert context.usage.searches == 2
+    assert len(context.attempts) == 2
 
 
 def test_requested_scope_is_intersected_with_authorized_scope():
@@ -173,7 +173,7 @@ def test_fully_unauthorized_scope_is_invalid_without_searching():
     assert store.calls == []
     assert context.attempts[0].status is AttemptStatus.INVALID
     assert context.attempts[0].effective_doc_ids == []
-    assert context.usage.searches == 1
+    assert len(context.attempts) == 1
 
 
 def test_empty_authorized_scope_never_becomes_an_unfiltered_search():
@@ -225,7 +225,7 @@ def test_retrieval_failure_is_recorded_and_translated():
 
     assert context.attempts[0].status is AttemptStatus.FAILED
     assert context.attempts[0].error_code == "retrieval_failed"
-    assert context.usage.searches == 1
+    assert len(context.attempts) == 1
 
 
 def stored_chunk(order: int, text: str) -> StoredChunk:
@@ -266,9 +266,8 @@ def test_context_inspection_registers_neighbors_without_duplicating_source():
     assert result.status is AttemptStatus.SUCCEEDED
     assert result.new_evidence_count == 2
     assert [item.evidence_id for item in result.evidence] == ["E2", "E1", "E3"]
-    assert context.usage.evidence_count == 3
-    assert context.usage.searches == 1
-    assert context.usage.tool_calls == 2
+    assert len(context.evidence) == 3
+    assert len(context.attempts) == 2
     assert context.attempts[-1].tool_name == "inspect_evidence_context"
 
 

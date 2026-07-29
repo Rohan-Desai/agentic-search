@@ -30,7 +30,6 @@ def execute_document_list(
     """List documents inside the request's authorized scope."""
 
     started_at = clock()
-    context.usage.tool_calls += 1
     effective_doc_ids = context.authorized_doc_ids
 
     if effective_doc_ids == []:

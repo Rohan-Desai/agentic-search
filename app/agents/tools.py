@@ -17,7 +17,7 @@ from app.services.vector_store import get_vector_store
 
 @function_tool
 def search_documents(query: str, top_k: int = 5) -> str:
-    """Semantic search across all ingested documents.
+    """Hybrid search across all ingested documents.
 
     Args:
         query: A natural-language search query.
@@ -25,7 +25,7 @@ def search_documents(query: str, top_k: int = 5) -> str:
 
     Returns:
         A formatted list of matching passages with their document id, filename,
-        similarity score, and text. Use these to ground your answer and to cite
+        hybrid rank score, and text. Use these to ground your answer and to cite
         sources by doc_id/filename.
     """
     top_k = max(1, min(top_k, 20))
@@ -43,7 +43,7 @@ def search_documents(query: str, top_k: int = 5) -> str:
 
 @function_tool
 def search_within_documents(query: str, doc_ids: list[str], top_k: int = 5) -> str:
-    """Semantic search restricted to a specific set of documents.
+    """Hybrid search restricted to a specific set of documents.
 
     Args:
         query: A natural-language search query.

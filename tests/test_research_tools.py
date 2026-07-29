@@ -121,7 +121,7 @@ def test_application_handler_updates_request_scoped_state():
     assert result.evidence[0].evidence_id == "E1"
     assert research.evidence[0].evidence_id == "E1"
     assert research.attempts[0].result_evidence_ids == ["E1"]
-    assert research.usage.searches == 1
+    assert len(research.attempts) == 1
 
 
 @pytest.mark.asyncio
@@ -292,7 +292,7 @@ async def test_sdk_list_documents_tool_returns_authorized_catalog():
     assert result.status is AttemptStatus.SUCCEEDED
     assert [document.doc_id for document in result.documents] == ["doc-2"]
     assert research.attempts[-1].tool_name == "list_documents"
-    assert research.usage.tool_calls == 1
+    assert len(research.attempts) == 1
 
 
 def test_list_documents_tool_returns_safe_failure():

@@ -1,9 +1,4 @@
-"""Internal models for one agentic research request.
-
-These models are intentionally separate from the public API schemas. They
-describe how research is tracked internally and can evolve without breaking
-the frontend contract.
-"""
+"""Internal state and tool-result models for one agentic search request."""
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -14,35 +9,6 @@ from pydantic import BaseModel, Field
 from app.models.schemas import ConversationTurn
 
 
-class RequirementStatus(str, Enum):
-    """How well the evidence ledger covers one part of the question."""
-
-    UNSEARCHED = "unsearched"
-    WEAK = "weak"
-    SUPPORTED = "supported"
-    CONFLICTING = "conflicting"
-    NOT_FOUND = "not_found"
-
-
-class EvidenceStatus(str, Enum):
-    """Intrinsic quality of a retrieved passage."""
-
-    CANDIDATE = "candidate"
-    DIRECT = "direct"
-    CONTEXTUAL = "contextual"
-    WEAK = "weak"
-    REJECTED = "rejected"
-
-
-class EvidenceRelationship(str, Enum):
-    """How one evidence record relates to one answer requirement."""
-
-    SUPPORTS = "supports"
-    CONTRADICTS = "contradicts"
-    QUALIFIES = "qualifies"
-    CONTEXT = "context"
-
-
 class AttemptStatus(str, Enum):
     """Outcome of one tool-backed research attempt."""
 
@@ -50,18 +16,6 @@ class AttemptStatus(str, Enum):
     EMPTY = "empty"
     INVALID = "invalid"
     FAILED = "failed"
-
-
-class StopReason(str, Enum):
-    """Why the research loop ended."""
-
-    COMPLETE = "complete"
-    CLARIFICATION = "clarification"
-    NOT_FOUND = "not_found"
-    NO_PROGRESS = "no_progress"
-    BUDGET_EXHAUSTED = "budget_exhausted"
-    TIMEOUT = "timeout"
-    ERROR = "error"
 
 
 class AgentAnswerOutcome(str, Enum):
@@ -79,20 +33,9 @@ class AgentAnswer(BaseModel):
     outcome: AgentAnswerOutcome
 
 
-class ClaimType(str, Enum):
-    """How a material claim relates to its supporting evidence."""
-
-    DIRECT = "direct"
-    DERIVED = "derived"
-    INTERPRETATION = "interpretation"
-
-
 class EvidenceLocation(BaseModel):
-    """Human-readable location inside a source document."""
+    """Location needed to retrieve adjacent chunks from a source document."""
 
-    page: int | None = Field(default=None, ge=1)
-    sheet: str | None = None
-    section: str | None = None
     chunk_order: int | None = Field(default=None, ge=0)
 
 
@@ -104,7 +47,7 @@ class EvidenceDiscovery(BaseModel):
 
 
 class EvidenceCandidate(BaseModel):
-    """Structured passage returned by retrieval before ledger registration."""
+    """Passage returned by retrieval before ledger registration."""
 
     doc_id: str = Field(..., min_length=1)
     filename: str = Field(..., min_length=1)
@@ -116,7 +59,7 @@ class EvidenceCandidate(BaseModel):
 
 
 class EvidenceRecord(BaseModel):
-    """One retrieved passage and its provenance."""
+    """One canonical retrieved passage and its provenance."""
 
     evidence_id: str = Field(..., min_length=1)
     doc_id: str = Field(..., min_length=1)
@@ -124,30 +67,11 @@ class EvidenceRecord(BaseModel):
     chunk_id: str = Field(..., min_length=1)
     text: str = Field(..., min_length=1)
     location: EvidenceLocation = Field(default_factory=EvidenceLocation)
-    status: EvidenceStatus = EvidenceStatus.CANDIDATE
     discoveries: list[EvidenceDiscovery] = Field(..., min_length=1)
 
 
-class AnswerRequirement(BaseModel):
-    """One material part of a question that needs an evidence-backed answer."""
-
-    requirement_id: str = Field(..., min_length=1)
-    description: str = Field(..., min_length=1)
-    status: RequirementStatus = RequirementStatus.UNSEARCHED
-    evidence_ids: list[str] = Field(default_factory=list)
-
-
-class EvidenceAssessment(BaseModel):
-    """A semantic relationship between evidence and an answer requirement."""
-
-    evidence_id: str = Field(..., min_length=1)
-    requirement_id: str = Field(..., min_length=1)
-    relationship: EvidenceRelationship
-    rationale: str | None = None
-
-
 class SearchAttempt(BaseModel):
-    """A recorded tool action and whether it advanced the research."""
+    """A recorded tool action exposed as an agent step in the response."""
 
     tool_name: str = Field(..., min_length=1)
     query: str | None = None
@@ -211,48 +135,6 @@ class DocumentListResult(BaseModel):
     error_code: str | None = None
 
 
-class MaterialClaim(BaseModel):
-    """A factual statement proposed for the final answer."""
-
-    claim_id: str = Field(..., min_length=1)
-    text: str = Field(..., min_length=1)
-    requirement_ids: list[str] = Field(..., min_length=1)
-    evidence_ids: list[str] = Field(..., min_length=1)
-    claim_type: ClaimType = ClaimType.DIRECT
-
-
-class ValidationResult(BaseModel):
-    """Result of checking a proposed answer against collected evidence."""
-
-    valid: bool
-    errors: list[str] = Field(default_factory=list)
-    warnings: list[str] = Field(default_factory=list)
-    repair_allowed: bool = False
-
-
-class ResearchBudget(BaseModel):
-    """Configured upper bounds for one agentic search."""
-
-    max_turns: int = Field(default=12, ge=1)
-    max_tool_calls: int = Field(default=8, ge=1)
-    max_searches: int = Field(default=5, ge=1)
-    max_evidence: int = Field(default=30, ge=1)
-    max_context_chars: int = Field(default=30_000, ge=1)
-    timeout_seconds: float = Field(default=60.0, gt=0)
-    no_progress_limit: int = Field(default=2, ge=1)
-
-
-class ResearchUsage(BaseModel):
-    """Resources consumed so far by one agentic search."""
-
-    turns: int = Field(default=0, ge=0)
-    tool_calls: int = Field(default=0, ge=0)
-    searches: int = Field(default=0, ge=0)
-    evidence_count: int = Field(default=0, ge=0)
-    context_chars: int = Field(default=0, ge=0)
-    consecutive_no_progress: int = Field(default=0, ge=0)
-
-
 def utc_now() -> datetime:
     """Return an aware UTC timestamp for request timing."""
 
@@ -260,21 +142,14 @@ def utc_now() -> datetime:
 
 
 class ResearchContext(BaseModel):
-    """All mutable research state isolated to one incoming search request."""
+    """Mutable application state isolated to one agentic search request."""
 
     request_id: str = Field(..., min_length=1)
     original_query: str = Field(..., min_length=1)
-    resolved_query: str | None = None
     history: list[ConversationTurn] = Field(default_factory=list)
     authorized_doc_ids: list[str] | None = None
     retrieval_top_k: int = Field(default=5, ge=1, le=50)
-    requirements: list[AnswerRequirement] = Field(default_factory=list)
     evidence: list[EvidenceRecord] = Field(default_factory=list)
-    evidence_assessments: list[EvidenceAssessment] = Field(default_factory=list)
     attempts: list[SearchAttempt] = Field(default_factory=list)
-    claims: list[MaterialClaim] = Field(default_factory=list)
-    budget: ResearchBudget = Field(default_factory=ResearchBudget)
-    usage: ResearchUsage = Field(default_factory=ResearchUsage)
+    max_turns: int = Field(default=12, ge=1)
     started_at: datetime = Field(default_factory=utc_now)
-    stop_reason: StopReason | None = None
-    validation: ValidationResult | None = None

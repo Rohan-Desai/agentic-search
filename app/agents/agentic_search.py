@@ -185,7 +185,7 @@ async def run_agentic_search(
         build_agent(),
         build_agent_input(query, history),
         context=tool_context,
-        max_turns=context.budget.max_turns,
+        max_turns=context.max_turns,
     )
     output = AgentAnswer.model_validate(result.final_output)
 

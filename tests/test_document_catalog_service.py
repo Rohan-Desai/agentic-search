@@ -56,8 +56,8 @@ def test_document_list_respects_authorized_scope_and_records_attempt():
     assert [document.doc_id for document in result.documents] == ["doc-002"]
     assert store.calls == [["doc-002"]]
     assert context.attempts[0].effective_doc_ids == ["doc-002"]
-    assert context.usage.tool_calls == 1
-    assert context.usage.evidence_count == 0
+    assert len(context.attempts) == 1
+    assert context.evidence == []
 
 
 def test_empty_authorized_scope_does_not_read_unfiltered_catalog():

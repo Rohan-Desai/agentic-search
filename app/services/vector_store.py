@@ -7,16 +7,22 @@ so the agent tools keep working.
 """
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass
+import re
 
 import chromadb
 from chromadb.config import Settings as ChromaSettings
+from rank_bm25 import BM25Okapi
 
 from app.core.config import get_settings
 from app.ingestion.chunker import Chunk
 from app.services.embeddings import embed_query, embed_texts
 
 _COLLECTION = "documents"
+_TOKEN_PATTERN = re.compile(r"[a-z0-9]+")
+_RRF_K = 60
+_SEMANTIC_CANDIDATE_MULTIPLIER = 3
 
 
 @dataclass
@@ -43,6 +49,67 @@ class IndexedDocument:
     doc_id: str
     filename: str
     chunk_count: int
+
+
+def _tokenize(value: str) -> list[str]:
+    """Return lowercase alphanumeric terms for lexical ranking."""
+
+    return _TOKEN_PATTERN.findall(value.lower())
+
+
+def _keyword_ranking(query: str, chunks: list[StoredChunk]) -> list[str]:
+    """Rank chunks containing query terms with BM25."""
+
+    query_tokens = _tokenize(query)
+    if not query_tokens or not chunks:
+        return []
+
+    corpus = [
+        _tokenize(f"{chunk.filename} {chunk.text}")
+        for chunk in chunks
+    ]
+    query_terms = set(query_tokens)
+    matching_indexes = [
+        index
+        for index, tokens in enumerate(corpus)
+        if query_terms.intersection(tokens)
+    ]
+    if not matching_indexes:
+        return []
+
+    scores = BM25Okapi(corpus).get_scores(query_tokens)
+    ranked_indexes = sorted(
+        matching_indexes,
+        key=lambda index: (-float(scores[index]), index),
+    )
+    return [chunks[index].chunk_id for index in ranked_indexes]
+
+
+def _reciprocal_rank_fusion(
+    rankings: list[list[str]],
+    *,
+    rank_constant: int = _RRF_K,
+) -> dict[str, float]:
+    """Fuse ranked chunk IDs and normalize scores to a zero-to-one range."""
+
+    active_rankings = [ranking for ranking in rankings if ranking]
+    if not active_rankings:
+        return {}
+
+    scores: defaultdict[str, float] = defaultdict(float)
+    for ranking in active_rankings:
+        seen: set[str] = set()
+        for rank, chunk_id in enumerate(ranking, start=1):
+            if chunk_id in seen:
+                continue
+            seen.add(chunk_id)
+            scores[chunk_id] += 1.0 / (rank_constant + rank)
+
+    maximum = len(active_rankings) / (rank_constant + 1)
+    return {
+        chunk_id: score / maximum
+        for chunk_id, score in scores.items()
+    }
 
 
 class VectorStore:
@@ -108,29 +175,76 @@ class VectorStore:
     def search(
         self, query: str, top_k: int = 5, doc_ids: list[str] | None = None
     ) -> list[SearchHit]:
-        where = {"doc_id": {"$in": doc_ids}} if doc_ids else None
-        result = self._collection.query(
+        """Return top hybrid results from semantic and BM25 rankings."""
+
+        if top_k <= 0 or doc_ids == []:
+            return []
+
+        where = {"doc_id": {"$in": doc_ids}} if doc_ids is not None else None
+        chunks = self._get_searchable_chunks(where)
+        if not chunks:
+            return []
+
+        semantic_result = self._collection.query(
             query_embeddings=[embed_query(query)],
-            n_results=top_k,
+            n_results=min(
+                len(chunks),
+                top_k * _SEMANTIC_CANDIDATE_MULTIPLIER,
+            ),
             where=where,
         )
-        hits: list[SearchHit] = []
-        ids = result.get("ids", [[]])[0]
-        docs = result.get("documents", [[]])[0]
-        metas = result.get("metadatas", [[]])[0]
-        dists = result.get("distances", [[]])[0]
-        for cid, text, meta, dist in zip(ids, docs, metas, dists):
-            hits.append(
-                SearchHit(
-                    doc_id=str(meta.get("doc_id", "")),
-                    filename=str(meta.get("filename", "")),
-                    chunk_id=cid,
-                    text=text,
-                    score=1.0 - float(dist),  # cosine distance -> similarity
-                    order=int(meta["order"]) if meta.get("order") is not None else None,
-                )
+        semantic_ranking = list(
+            semantic_result.get("ids", [[]])[0]
+        )
+        keyword_ranking = _keyword_ranking(query, chunks)
+        fused_scores = _reciprocal_rank_fusion(
+            [semantic_ranking, keyword_ranking]
+        )
+        chunks_by_id = {chunk.chunk_id: chunk for chunk in chunks}
+        ranked_ids = sorted(
+            (
+                chunk_id
+                for chunk_id in fused_scores
+                if chunk_id in chunks_by_id
+            ),
+            key=lambda chunk_id: (-fused_scores[chunk_id], chunk_id),
+        )[:top_k]
+
+        return [
+            SearchHit(
+                doc_id=chunks_by_id[chunk_id].doc_id,
+                filename=chunks_by_id[chunk_id].filename,
+                chunk_id=chunk_id,
+                text=chunks_by_id[chunk_id].text,
+                score=fused_scores[chunk_id],
+                order=chunks_by_id[chunk_id].order,
             )
-        return hits
+            for chunk_id in ranked_ids
+        ]
+
+    def _get_searchable_chunks(
+        self,
+        where: dict | None,
+    ) -> list[StoredChunk]:
+        """Load scoped chunk text and metadata for lexical ranking."""
+
+        kwargs = {"include": ["documents", "metadatas"]}
+        if where is not None:
+            kwargs["where"] = where
+        result = self._collection.get(**kwargs)
+        ids = result.get("ids") or []
+        docs = result.get("documents") or []
+        metas = result.get("metadatas") or []
+        return [
+            StoredChunk(
+                doc_id=str(meta.get("doc_id", "")),
+                filename=str(meta.get("filename", "")),
+                chunk_id=str(chunk_id),
+                text=str(text),
+                order=int(meta.get("order", -1)),
+            )
+            for chunk_id, text, meta in zip(ids, docs, metas)
+        ]
 
     def get_context(
         self,

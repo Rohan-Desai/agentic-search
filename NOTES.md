@@ -5,8 +5,8 @@
 I implemented agentic search as one OpenAI Agents SDK agent with three
 request-scoped document tools:
 
-- `search_evidence` performs semantic retrieval across all authorized documents
-  or a model-selected subset.
+- `search_evidence` performs hybrid semantic and BM25 retrieval across all
+  authorized documents or a model-selected subset.
 - `inspect_evidence_context` retrieves bounded neighboring chunks when an
   isolated result needs context.
 - `list_documents` exposes the searchable document catalog without treating the
@@ -30,6 +30,12 @@ The agent's structured output is deliberately small:
 I initially considered explicit requirement graphs and a separate validation
 and repair pipeline. Behavioral testing showed that this duplicated model
 bookkeeping without proving factual correctness, so I chose the smaller design.
+
+Initial manual evaluation also showed that semantic retrieval could miss exact
+filenames, spreadsheet rows, numbers, and rare incident terminology. I added
+BM25 keyword ranking over filename plus chunk text and combine it with Chroma's
+semantic ranking using Reciprocal Rank Fusion. The model still sees one search
+tool; retrieval quality improves without adding another tool-selection decision.
 
 ## Agent behavior
 
@@ -56,9 +62,9 @@ Only passages returned by the request-scoped tools enter the evidence ledger.
 Inline forms such as `[E1][E2]` and `[E1, E2]` are supported. Citations preserve
 the filename, document ID, chunk ID, snippet, and best retrieval score.
 
-Retrieval score is treated as a search-ranking signal, not confidence that a
-claim is true. The implementation guarantees that a citation came from an
-authorized document retrieved during the current request. It does not claim to
+Retrieval score is a normalized hybrid rank signal, not confidence that a claim
+is true. The implementation guarantees that a citation came from an authorized
+document retrieved during the current request. It does not claim to
 deterministically prove that the cited text entails every sentence.
 
 ## Scope and controls
@@ -71,11 +77,15 @@ deterministically prove that the cited text entails every sentence.
 
 ## Tradeoffs and remaining limitations
 
-Semantic retrieval can occasionally miss an exact row or highly specific
-document even after sensible reformulation. Model-generated arithmetic and
-interpretation can also be imperfect. A table-aware query tool or calculator
-would improve numerical reliability, but I left these out to keep the
-submission focused.
+The current BM25 implementation loads scoped chunk text from Chroma for each
+search. That is simple and appropriate for this small corpus, but a large
+production collection would need a persistent lexical index or a store with
+native hybrid retrieval. The agent can also narrow to an unhelpful document
+subset, so improved retrieval does not remove model-level tool judgment.
+
+Model-generated arithmetic and interpretation can still be imperfect. A
+table-aware query tool or calculator would improve numerical reliability, but
+I left these out to keep the submission focused.
 
 The operational trace shows observable tool activity rather than private model
 reasoning. Provider and vector-store telemetry warnings are not customized in

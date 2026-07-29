@@ -18,6 +18,7 @@ pandas==2.2.3
 # --- Vector store / embeddings (candidate's choice; chromadb provided as default) ---
 chromadb==0.6.3
 numpy==2.2.1
+rank-bm25==0.2.2
 
 # --- Utilities ---
 python-dotenv==1.0.1
